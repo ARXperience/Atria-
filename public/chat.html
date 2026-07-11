@@ -74,7 +74,7 @@
     setInterval(poll, 5000);
 
     document.getElementById('send').onclick = send;
-    document.getElementById('text').onkeydown = e => e.key === 'Enter' && send();
+    document.getElementById('text').onkeydown = e => { if (e.key === 'Enter') send(); };
   </script>
 </body>
 </html>

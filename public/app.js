@@ -93,7 +93,8 @@
       } catch (err) { toast(err.message, true); }
     };
     $('#loginBtn').onclick = doLogin;
-    $('#password').onkeydown = e => e.key === 'Enter' && doLogin();
+    // Nota: el handler debe usar llaves; devolver false en onkeydown cancela la tecla
+    $('#password').onkeydown = e => { if (e.key === 'Enter') doLogin(); };
   }
 
   // ---------- shell ----------
@@ -442,7 +443,7 @@
       const body = $('#chatBody');
       body.scrollTop = body.scrollHeight;
       $('#chatSend').onclick = sendMsg;
-      $('#chatText').onkeydown = e => e.key === 'Enter' && sendMsg();
+      $('#chatText').onkeydown = e => { if (e.key === 'Enter') sendMsg(); };
       window._takeover = async release => {
         try {
           await api(`/inbox/conversations/${id}/takeover`, { method: 'POST', body: { release } });
