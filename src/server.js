@@ -15,6 +15,8 @@ import { inboxRouter } from './routes/inbox.js';
 import { crmRouter } from './routes/crm.js';
 import { opsRouter } from './routes/ops.js';
 import { complianceRouter } from './routes/compliance.js';
+import { hrRouter } from './routes/hr.js';
+import { invoicesRouter } from './routes/invoices.js';
 import { miscRouter } from './routes/misc.js';
 import { publicRouter } from './routes/public.js';
 import { registerAutomations } from './services/automations.js';
@@ -24,7 +26,8 @@ import { resumeSavedSessions } from './services/whatsapp.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.set('trust proxy', true);
-app.use(express.json({ limit: '2mb' }));
+// rawBody se conserva para verificar firmas de webhooks (Stripe/Bold)
+app.use(express.json({ limit: '2mb', verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); } }));
 
 // Salud
 app.get('/api/health', async (_req, res) => {
@@ -49,6 +52,8 @@ app.use('/api/inbox', authRequired, inboxRouter);
 app.use('/api/crm', authRequired, crmRouter);
 app.use('/api/ops', authRequired, opsRouter);
 app.use('/api/compliance', authRequired, complianceRouter);
+app.use('/api/hr', authRequired, hrRouter);
+app.use('/api/invoices', authRequired, invoicesRouter);
 app.use('/api', authRequired, miscRouter);
 
 // Frontend estático: panel admin + página de pago + portal huésped

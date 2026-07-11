@@ -22,7 +22,7 @@ async function sendToGuest(propertyId, reservationId, text) {
 }
 
 export function registerAutomations() {
-  // Check-out → tarea de limpieza + encuesta (flujo 48.3)
+  // Check-out → tarea de limpieza + borrador de factura + encuesta (flujo 48.3)
   bus.on('checkout.completed', async ({ propertyId, reservationId, roomId }) => {
     try {
       if (roomId) {
@@ -30,6 +30,10 @@ export function registerAutomations() {
           data: { propertyId, roomId, type: 'checkout_clean', priority: 'high', notes: `Post check-out reserva ${reservationId}` },
         });
       }
+      // Atria Fiscal: borrador de factura automático desde el folio (sección 16)
+      const { createInvoiceFromReservation } = await import('./invoicing.js');
+      await createInvoiceFromReservation(reservationId, { actor: 'system' })
+        .catch(err => logger.warn({ err: err.message }, 'auto invoice draft failed'));
       await sendToGuest(propertyId, reservationId,
         '¡Gracias por hospedarte con nosotros! 🌟 ¿Cómo calificarías tu estadía de 1 a 5? Tu opinión nos ayuda a mejorar.');
     } catch (err) { logger.error({ err }, 'automation checkout failed'); }

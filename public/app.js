@@ -109,6 +109,10 @@
     ['inbox', '💬 Inbox / WhatsApp'],
     ['crm', '👥 CRM'],
     ['payments', '💳 Pagos'],
+    ['invoices', '🧾 Facturación'],
+    ['sep', 'Personas'],
+    ['employees', '👔 Empleados'],
+    ['payroll', '💰 Nómina'],
     ['sep', 'Gobierno'],
     ['approvals', '✅ Aprobaciones'],
     ['compliance', '⚖️ Cumplimiento'],
@@ -229,6 +233,13 @@
         toast('Cargo agregado'); render();
       } catch (err) { toast(err.message, true); }
     };
+    window._genInvoice = async () => {
+      try {
+        await api('/invoices/from-reservation', { method: 'POST', body: { reservationId: id } });
+        toast('Borrador de factura creado — ver 🧾 Facturación');
+        location.hash = 'invoices';
+      } catch (err) { toast(err.message, true); }
+    };
     window._payLink = async () => {
       try {
         const { data } = await api('/payments/links', { method: 'POST', body: { propertyId: state.propertyId, reservationId: id, concept: `Pago reserva ${r.code}`, amount: +$('#plAmount').value } });
@@ -257,6 +268,7 @@
             ${['tentative', 'confirmed'].includes(r.status) ? `<button class="btn small fit" onclick="_resAction('checkin')">Check-in</button>
               <button class="btn small danger fit" onclick="_resAction('cancel',{reason:prompt('Motivo de cancelación:')||''})">Cancelar</button>` : ''}
             ${r.status === 'checked_in' ? `<button class="btn small fit" onclick="_resAction('checkout')">Check-out</button>` : ''}
+            ${r.status === 'checked_out' ? `<button class="btn small secondary fit" onclick="_genInvoice()">🧾 Generar factura</button>` : ''}
           </div>
         </div>
         <div class="card">
@@ -604,6 +616,198 @@
         ${s.status === 'prepared' ? `<button class="btn small secondary" onclick="_sireMark('${s.id}','reported')">Marcar reportado</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">Sin huéspedes extranjeros detectados.</p>'}</div>`;
   }
 
+  async function viewInvoices() {
+    const { dataicoConfigured, invoices } = await get(`/invoices?${pid()}`);
+    window._issueInv = async id => {
+      try {
+        const { data } = await api(`/invoices/${id}/issue`, { method: 'POST' });
+        toast(data.status === 'validated' ? `Factura ${data.fullNumber} validada (CUFE recibido)` : `Factura ${data.fullNumber || ''} ${data.status === 'pending' ? 'numerada, pendiente de transmisión' : data.status}`);
+        render();
+      } catch (err) { toast(err.message, true); }
+    };
+    return `
+      <div class="card"><h3>Proveedor tecnológico DIAN</h3>
+        ${dataicoConfigured
+          ? `${badge('Dataico conectado', 'green')} Las facturas emitidas se transmiten a la DIAN.`
+          : `${badge('Dataico sin configurar', 'yellow')} <span class="muted">Las facturas se generan y numeran localmente como borrador. Configura <code>DATAICO_AUTH_TOKEN</code> y <code>DATAICO_ACCOUNT_ID</code> en .env para transmitir a la DIAN.</span>`}
+      </div>
+      <div class="card"><table>
+        <tr><th>Número</th><th>Reserva</th><th>Cliente</th><th>Subtotal</th><th>IVA</th><th>Total</th><th>Estado</th><th>CUFE</th><th></th></tr>
+        ${invoices.map(i => `<tr>
+          <td>${esc(i.fullNumber || '(borrador)')}</td><td>${esc(i.reservation?.code || '—')}</td><td>${esc(i.customerName)}</td>
+          <td>${cop(i.subtotal)}</td><td>${cop(i.tax)}</td><td><b>${cop(i.total)}</b></td>
+          <td>${sb(i.status)}${i.errorMsg ? `<div class="muted" style="font-size:10.5px;max-width:200px">${esc(i.errorMsg.slice(0, 90))}</div>` : ''}</td>
+          <td class="muted" style="font-size:11px">${esc((i.cufe || '').slice(0, 12))}${i.cufe ? '…' : '—'}</td>
+          <td>${['draft', 'error'].includes(i.status) ? `<button class="btn small" onclick="_issueInv('${i.id}')">Emitir</button>` : ''}</td>
+        </tr>`).join('')}
+      </table>${invoices.length ? '' : '<p class="muted">Sin facturas. Se generan automáticamente como borrador en cada check-out.</p>'}</div>`;
+  }
+
+  async function viewEmployees() {
+    const employees = await get(`/hr/employees?${pid()}`);
+    window._addEmployee = async () => {
+      try {
+        await api('/hr/employees', {
+          method: 'POST',
+          body: {
+            propertyId: state.propertyId, fullName: $('#eName').value, documentNumber: $('#eDoc').value,
+            position: $('#ePos').value, area: $('#eArea').value, salary: +$('#eSalary').value,
+            hireDate: $('#eHire').value, riskClass: +$('#eRisk').value, contractType: $('#eContract').value,
+            eps: $('#eEps').value, afp: $('#eAfp').value, arl: $('#eArl').value,
+          },
+        });
+        toast('Empleado creado'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._simLiq = async id => {
+      try {
+        const { data } = await api('/hr/liquidations/simulate', { method: 'POST', body: { employeeId: id, cause: 'renuncia' } });
+        modal(`<h2>Simulación de liquidación — ${esc(data.employee.name)}</h2>
+          <p class="muted" style="font-size:12px">Ingreso: ${day(data.employee.hireDate)} · Salario: ${cop(data.employee.salary)} · Causa: ${esc(data.cause)}</p>
+          <table class="mt">${data.items.map(i => `<tr><td>${esc(i.concept)}</td><td class="right">${cop(i.amount)}</td></tr>`).join('')}
+          <tr><td><b>Total estimado</b></td><td class="right"><b>${cop(data.total)}</b></td></tr></table>
+          <p class="muted mt" style="font-size:11.5px">${esc(data.note)}</p>`);
+      } catch (err) { toast(err.message, true); }
+    };
+    return `
+      <div class="card"><h3>Nuevo empleado</h3>
+        <div class="row">
+          <div><label>Nombre completo *</label><input id="eName"></div>
+          <div><label>Documento *</label><input id="eDoc"></div>
+          <div><label>Cargo *</label><input id="ePos"></div>
+          <div><label>Área</label><input id="eArea" placeholder="recepción"></div>
+        </div>
+        <div class="row">
+          <div><label>Salario mensual *</label><input id="eSalary" type="number" value="1623500"></div>
+          <div><label>Fecha ingreso *</label><input id="eHire" type="date"></div>
+          <div><label>Contrato</label><select id="eContract"><option>indefinido</option><option>fijo</option><option>obra</option><option>aprendizaje</option></select></div>
+          <div><label>Riesgo ARL</label><select id="eRisk"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></div>
+        </div>
+        <div class="row">
+          <div><label>EPS</label><input id="eEps"></div>
+          <div><label>AFP</label><input id="eAfp"></div>
+          <div><label>ARL</label><input id="eArl"></div>
+          <button class="btn fit" onclick="_addEmployee()">Crear</button>
+        </div>
+      </div>
+      <div class="card"><table>
+        <tr><th>Nombre</th><th>Documento</th><th>Cargo</th><th>Salario</th><th>Ingreso</th><th>EPS/AFP</th><th>Estado</th><th></th></tr>
+        ${employees.map(e => `<tr>
+          <td>${esc(e.fullName)}</td><td>${esc(e.documentNumber)}</td><td>${esc(e.position)}</td>
+          <td>${cop(e.salary)}</td><td>${day(e.hireDate)}</td>
+          <td class="muted" style="font-size:12px">${esc(e.eps || '⚠ sin EPS')} / ${esc(e.afp || '⚠ sin AFP')}</td>
+          <td>${e.status === 'active' ? badge('Activo', 'green') : badge('Retirado', 'gray')}</td>
+          <td><button class="btn small secondary" onclick="_simLiq('${e.id}')">Simular liquidación</button></td>
+        </tr>`).join('')}
+      </table>${employees.length ? '' : '<p class="muted">Sin empleados registrados.</p>'}</div>`;
+  }
+
+  async function viewPayroll() {
+    const [periods, employees, novelties, types] = await Promise.all([
+      get(`/hr/payroll/periods?${pid()}`),
+      get(`/hr/employees?${pid()}&status=active`),
+      get(`/hr/novelties?${pid()}`),
+      get('/hr/novelty-types'),
+    ]);
+    const now = new Date();
+    window._createPeriod = async () => {
+      try {
+        await api('/hr/payroll/periods', { method: 'POST', body: { propertyId: state.propertyId, year: +$('#pYear').value, month: +$('#pMonth').value } });
+        toast('Periodo creado'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._calcPeriod = async id => {
+      try {
+        const { data } = await api(`/hr/payroll/periods/${id}/calculate`, { method: 'POST' });
+        toast(`Nómina calculada (${data.employees} empleados)` + (data.warnings.length ? ` — ${data.warnings.length} advertencia(s)` : ''));
+        if (data.warnings.length) setTimeout(() => toast('⚠ ' + data.warnings[0], true), 1200);
+        render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._closePeriod = async id => {
+      try {
+        await api(`/hr/payroll/periods/${id}/close`, { method: 'POST' });
+        toast('Cierre enviado a aprobación del dueño'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._viewPeriod = async id => {
+      const p = await get(`/hr/payroll/periods/${id}`);
+      modal(`<h2>Nómina ${p.month}/${p.year} ${sb(p.status)}</h2>
+        <table class="mt"><tr><th>Empleado</th><th>Días</th><th>Devengado</th><th>Deducciones</th><th>Neto</th><th>Costo patronal</th></tr>
+        ${p.items.map(i => `<tr class="clickable" onclick='window._slipShow(${JSON.stringify(JSON.stringify({ name: i.employee.fullName, b: i.breakdown }))})'>
+          <td>${esc(i.employee.fullName)}<div class="muted" style="font-size:11px">${esc(i.employee.position)}</div></td>
+          <td>${i.daysWorked}</td><td>${cop(i.earned)}</td><td>${cop(i.deductions)}</td><td><b>${cop(i.net)}</b></td><td class="muted">${cop(i.employerCost)}</td></tr>`).join('')}
+        <tr><td><b>Totales</b></td><td></td><td><b>${cop(p.totalEarned)}</b></td><td><b>${cop(p.totalDeductions)}</b></td><td><b>${cop(p.totalNet)}</b></td><td><b>${cop(p.totalEmployerCost)}</b></td></tr></table>
+        <p class="muted mt" style="font-size:11.5px">Clic en un empleado para ver el desprendible detallado.</p>`);
+    };
+    window._slipShow = json => {
+      const { name, b } = JSON.parse(json);
+      const rows = list => list.map(x => `<tr><td>${esc(x.concept)}${x.detail ? ` <span class="muted" style="font-size:11px">(${esc(x.detail)})</span>` : ''}</td><td class="right">${cop(x.amount)}</td></tr>`).join('');
+      modal(`<h2>Desprendible — ${esc(name)}</h2>
+        <h3 class="mt">Devengados</h3><table>${rows(b.earned)}</table>
+        <h3 class="mt">Deducciones (IBC ${cop(b.IBC)})</h3><table>${rows(b.deductions)}</table>
+        <h3 class="mt">Costos patronales</h3><table>${rows(b.employer)}</table>
+        <h3 class="mt">Provisiones prestacionales</h3><table>${rows(b.provisions)}</table>`);
+    };
+    window._addNovelty = async () => {
+      try {
+        await api('/hr/novelties', {
+          method: 'POST',
+          body: {
+            propertyId: state.propertyId, employeeId: $('#nEmp').value, type: $('#nType').value,
+            date: $('#nDate').value, hours: $('#nHours').value || null, days: $('#nDays').value || null,
+            amount: $('#nAmount').value || null, notes: $('#nNotes').value,
+          },
+        });
+        toast('Novedad registrada (pendiente de aprobación)'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._decideNov = async (id, approve) => {
+      try { await api(`/hr/novelties/${id}/decide`, { method: 'POST', body: { approve } }); toast(approve ? 'Novedad aprobada' : 'Novedad rechazada'); render(); }
+      catch (err) { toast(err.message, true); }
+    };
+    const typeLabel = t => (types.find(x => x.type === t) || { label: t }).label;
+    return `
+      <div class="card"><h3>Periodos de nómina</h3>
+        <div class="row">
+          <div><label>Año</label><input id="pYear" type="number" value="${now.getFullYear()}"></div>
+          <div><label>Mes</label><input id="pMonth" type="number" min="1" max="12" value="${now.getMonth() + 1}"></div>
+          <button class="btn fit" onclick="_createPeriod()">Abrir periodo</button>
+        </div>
+        <table class="mt"><tr><th>Periodo</th><th>Empleados</th><th>Neto</th><th>Costo patronal</th><th>Estado</th><th></th></tr>
+        ${periods.map(p => `<tr>
+          <td><b>${p.month}/${p.year}</b></td><td>${p._count.items}</td>
+          <td>${p.totalNet != null ? cop(p.totalNet) : '—'}</td><td>${p.totalEmployerCost != null ? cop(p.totalEmployerCost) : '—'}</td>
+          <td>${sb(p.status)}</td>
+          <td>
+            ${p.status !== 'closed' ? `<button class="btn small secondary" onclick="_calcPeriod('${p.id}')">${p.status === 'calculated' ? 'Recalcular' : 'Calcular'}</button>` : ''}
+            ${p._count.items ? `<button class="btn small secondary" onclick="_viewPeriod('${p.id}')">Ver detalle</button>` : ''}
+            ${p.status === 'calculated' ? `<button class="btn small" onclick="_closePeriod('${p.id}')">Cerrar (aprueba dueño)</button>` : ''}
+          </td></tr>`).join('')}
+        </table>${periods.length ? '' : '<p class="muted mt">Sin periodos abiertos.</p>'}
+      </div>
+      <div class="card"><h3>Novedades (horas extras, ausencias, bonos…)</h3>
+        <div class="row">
+          <div><label>Empleado</label><select id="nEmp">${employees.map(e => `<option value="${e.id}">${esc(e.fullName)}</option>`).join('')}</select></div>
+          <div><label>Tipo</label><select id="nType">${types.map(t => `<option value="${t.type}">${esc(t.label)}</option>`).join('')}</select></div>
+          <div><label>Fecha</label><input id="nDate" type="date" value="${now.toISOString().slice(0, 10)}"></div>
+          <div><label>Horas</label><input id="nHours" type="number" step="0.5"></div>
+          <div><label>Días</label><input id="nDays" type="number" step="0.5"></div>
+          <div><label>Valor</label><input id="nAmount" type="number"></div>
+          <div><label>Notas</label><input id="nNotes"></div>
+          <button class="btn fit" onclick="_addNovelty()">Registrar</button>
+        </div>
+        <table class="mt"><tr><th>Empleado</th><th>Tipo</th><th>Fecha</th><th>Cantidad</th><th>Estado</th><th></th></tr>
+        ${novelties.slice(0, 30).map(n => `<tr>
+          <td>${esc(n.employee.fullName)}</td><td>${esc(typeLabel(n.type))}</td><td>${day(n.date)}</td>
+          <td>${n.hours ? n.hours + ' h' : ''}${n.days ? n.days + ' día(s)' : ''}${n.amount ? cop(n.amount) : ''}</td>
+          <td>${sb(n.status)}</td>
+          <td>${n.status === 'pending' ? `<button class="btn small" onclick="_decideNov('${n.id}',true)">Aprobar</button>
+            <button class="btn small danger" onclick="_decideNov('${n.id}',false)">Rechazar</button>` : ''}</td>
+        </tr>`).join('')}</table>
+      </div>`;
+  }
+
   async function viewAudit() {
     const logs = await get(`/audit-logs?${pid()}`);
     return `<div class="card"><table>
@@ -619,10 +823,11 @@
   }
 
   async function viewSettings() {
-    const [users, params, props] = await Promise.all([
+    const [users, params, props, gateways] = await Promise.all([
       get('/admin/users').catch(() => []),
       get('/admin/legal-parameters').catch(() => []),
       get('/admin/properties'),
+      get('/payments/gateways').catch(() => []),
     ]);
     const prop = props.find(p => p.id === state.propertyId) || props[0];
     window._addUser = async () => {
@@ -641,6 +846,10 @@
     return `
       <div class="card"><h3>Sede: ${esc(prop?.name || '')}</h3>
         <p class="muted">RNT: ${esc(prop?.rnt || 'sin registrar')} · ${prop?._count?.rooms ?? '—'} habitaciones · Webchat público: <a style="color:var(--accent2)" href="/chat.html?propertyId=${prop?.id}" target="_blank">/chat.html</a></p>
+      </div>
+      <div class="card"><h3>Pasarelas de pago</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:10px">Configura las llaves en <code>.env</code>. La pasarela por defecto se define con <code>PAYMENT_PROVIDER</code>; también puedes elegir pasarela por link de pago.</p>
+        <div class="row">${gateways.map(g => `<div class="fit" style="margin-right:8px">${g.configured ? badge(g.label + ' ✓', 'green') : badge(g.label, 'gray')}</div>`).join('')}</div>
       </div>
       <div class="card"><h3>Usuarios</h3>
         <table><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Último ingreso</th></tr>
@@ -678,6 +887,9 @@
     housekeeping: ['Housekeeping', viewHousekeeping],
     maintenance: ['Mantenimiento', viewMaintenance],
     payments: ['Pagos y links', viewPayments],
+    invoices: ['Facturación electrónica (Dataico)', viewInvoices],
+    employees: ['Empleados (Atria People)', viewEmployees],
+    payroll: ['Nómina colombiana', viewPayroll],
     approvals: ['Aprobaciones humanas', viewApprovals],
     compliance: ['Cumplimiento (RNT · TRA · SIRE)', viewCompliance],
     audit: ['Auditoría y trazabilidad', viewAudit],

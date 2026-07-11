@@ -1,31 +1,53 @@
-// Atria Pay (sección 15): links de pago, webhook de pasarela, pagos manuales
-// con aprobación y reembolsos con aprobación.
-import crypto from 'node:crypto';
+// Atria Pay (sección 15): links de pago multi-pasarela (mock, Wompi,
+// Mercado Pago, Bold, Stripe), webhook normalizado, pagos manuales y
+// reembolsos con aprobación.
 import { prisma } from '../db.js';
 import { config } from '../config.js';
 import { token } from '../lib/util.js';
 import { emitEvent } from '../lib/events.js';
 import { audit } from '../lib/audit.js';
 import { confirmReservation } from './reservations.js';
+import { getGateway } from './gateways/index.js';
 
-export async function createPaymentLink({ propertyId, reservationId = null, concept, amount, createdBy = null, expiresHours = 48 }) {
+export async function createPaymentLink({ propertyId, reservationId = null, concept, amount, createdBy = null, expiresHours = 48, provider = null }) {
   if (!(amount > 0)) throw new Error('El valor del link debe ser mayor a cero');
+  const providerName = provider || config.paymentProvider;
+  const gateway = getGateway(providerName);
+  if (!gateway.isConfigured()) {
+    throw new Error(`La pasarela ${providerName} no está configurada. Revisa las variables en .env o usa otra pasarela.`);
+  }
+
   const link = await prisma.paymentLink.create({
     data: {
       propertyId, reservationId, concept, amount,
       token: token(18),
-      provider: config.paymentProvider,
+      provider: providerName,
       expiresAt: new Date(Date.now() + expiresHours * 3600000),
       createdBy,
     },
   });
-  await audit({ propertyId, action: 'payment_link.created', entity: 'PaymentLink', entityId: link.id, after: { amount, concept } });
+
+  // Crear checkout en la pasarela externa (si aplica)
+  let externalUrl = null;
+  try {
+    const checkout = await gateway.createCheckout(link);
+    externalUrl = checkout?.externalUrl || null;
+    if (externalUrl) {
+      await prisma.paymentLink.update({ where: { id: link.id }, data: { externalUrl } });
+    }
+  } catch (err) {
+    // Si la pasarela externa falla, el link queda cancelado para no dejar cobros huérfanos
+    await prisma.paymentLink.update({ where: { id: link.id }, data: { status: 'cancelled' } });
+    throw new Error(`Error creando checkout en ${providerName}: ${err.message}`);
+  }
+
+  await audit({ propertyId, action: 'payment_link.created', entity: 'PaymentLink', entityId: link.id, after: { amount, concept, provider: providerName } });
   emitEvent('payment_link.created', { propertyId, reservationId, entityId: link.id });
-  return { ...link, url: paymentLinkUrl(link) };
+  return { ...link, externalUrl, url: paymentLinkUrl({ ...link, externalUrl }) };
 }
 
 export function paymentLinkUrl(link) {
-  return `${config.publicBaseUrl}/pay/${link.token}`;
+  return link.externalUrl || `${config.publicBaseUrl}/pay/${link.token}`;
 }
 
 // Aplica un pago aprobado: registra, marca link, confirma reserva si cubre anticipo.
@@ -67,33 +89,27 @@ export async function applyApprovedPayment({ paymentLink = null, reservationId =
   return payment;
 }
 
-// Webhook del proveedor de pagos. Para Wompi valida firma de eventos.
-export async function handleGatewayWebhook(providerName, body, headers = {}) {
-  if (providerName === 'wompi') {
-    const tx = body?.data?.transaction;
-    if (!tx) throw new Error('Payload Wompi inválido');
-    if (config.wompi.eventsSecret) {
-      const props = body.signature?.properties || [];
-      const values = props.map(p => p.split('.').reduce((o, k) => o?.[k], body.data)).join('');
-      const expected = crypto.createHash('sha256').update(values + body.timestamp + config.wompi.eventsSecret).digest('hex');
-      if (expected !== body.signature?.checksum) throw new Error('Firma de webhook Wompi inválida');
-    }
-    if (tx.status !== 'APPROVED') return { ignored: true, status: tx.status };
-    const link = await prisma.paymentLink.findUnique({ where: { token: tx.reference } });
-    if (!link || link.status === 'paid') return { ignored: true };
-    return applyApprovedPayment({
-      paymentLink: link, amount: tx.amount_in_cents / 100,
-      method: (tx.payment_method_type || 'card').toLowerCase(), provider: 'wompi', providerRef: tx.id,
-    });
-  }
-  // Proveedor mock/simulador
-  const link = await prisma.paymentLink.findUnique({ where: { token: body.reference } });
+// Webhook normalizado: cualquier pasarela registrada notifica por
+// /api/public/webhooks/payments/:provider y el adaptador traduce el evento.
+export async function handleGatewayWebhook(providerName, body, headers = {}, { query = {}, rawBody = null } = {}) {
+  const gateway = getGateway(providerName);
+  const event = await gateway.parseWebhook(body, headers, query, rawBody);
+  if (event.ignored) return event;
+  if (!event.approved) return { ignored: true, reason: 'transacción no aprobada' };
+  if (!event.reference) throw new Error('El evento no incluye referencia del link de pago');
+
+  const link = await prisma.paymentLink.findUnique({ where: { token: event.reference } });
   if (!link) throw new Error('Link de pago no encontrado');
-  if (link.status === 'paid') return { ignored: true };
-  if (link.expiresAt && link.expiresAt < new Date()) throw new Error('El link de pago está vencido');
+  if (link.status === 'paid') return { ignored: true, reason: 'ya pagado' };
+  if (providerName === 'mock' && link.expiresAt && link.expiresAt < new Date()) {
+    throw new Error('El link de pago está vencido');
+  }
   return applyApprovedPayment({
-    paymentLink: link, amount: link.amount,
-    method: body.method || 'mock', provider: 'mock', providerRef: body.txId || token(8),
+    paymentLink: link,
+    amount: event.amount ?? link.amount,
+    method: event.method || providerName,
+    provider: providerName,
+    providerRef: event.providerRef || token(8),
   });
 }
 

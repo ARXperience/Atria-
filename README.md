@@ -23,7 +23,7 @@ npm start                # http://localhost:4000
 | contabilidad@atria.co | Contabilidad |
 | auditor@atria.co | Auditor (solo lectura) |
 
-**Pruebas end-to-end**: `npm test` (26 pruebas de los flujos críticos de la sección 48 del documento).
+**Pruebas end-to-end**: `npm test` (38 pruebas de los flujos críticos de la sección 48 del documento).
 
 ## 📱 Vincular WhatsApp (Baileys)
 
@@ -43,11 +43,41 @@ Flujo completo implementado (sección 48.1 del documento):
 
 Guardrails: la IA nunca ofrece reembolsos/descuentos/compensaciones; quejas y solicitudes sensibles escalan a humano (la IA queda en pausa y recepción recibe alerta). Toda acción de IA queda en auditoría con actor `ai`.
 
-## 💳 Pagos
+## 💳 Pagos multi-pasarela
 
-- `PAYMENT_PROVIDER=mock` (por defecto): checkout simulado funcional en `/pay/<token>` — ideal para demo y desarrollo.
-- `PAYMENT_PROVIDER=wompi`: soporta webhook real de Wompi con validación de firma de eventos (`/api/public/webhooks/payments/wompi`). Configura las llaves en `.env`.
-- Pagos manuales (efectivo/transferencia) y reembolsos **siempre** pasan por el motor de aprobaciones (matriz sección 47).
+Arquitectura de adaptadores conectables (`src/services/gateways/`): cada pasarela implementa la misma interfaz (`createCheckout` + `parseWebhook` normalizado). Se pueden tener **varias configuradas a la vez** y elegir pasarela por link de pago; `PAYMENT_PROVIDER` define la de por defecto.
+
+| Pasarela | Variables `.env` | Webhook a registrar |
+|---|---|---|
+| **Simulador** (`mock`) | ninguna | — (checkout interno `/pay/<token>`) |
+| **Wompi** | `WOMPI_PUBLIC_KEY`, `WOMPI_EVENTS_SECRET` | `…/api/public/webhooks/payments/wompi` |
+| **Mercado Pago** | `MP_ACCESS_TOKEN` | `…/api/public/webhooks/payments/mercadopago` |
+| **Bold** | `BOLD_API_KEY`, `BOLD_SECRET_KEY` | `…/api/public/webhooks/payments/bold` |
+| **Stripe** | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | `…/api/public/webhooks/payments/stripe` (evento `checkout.session.completed`) |
+
+Todas verifican firma de webhook cuando el secreto está configurado, son idempotentes (un pago no se duplica) y confirman la reserva automáticamente al cubrir el anticipo. Para agregar otra pasarela: crear un archivo en `src/services/gateways/` y registrarlo en `index.js`.
+
+Pagos manuales (efectivo/transferencia) y reembolsos **siempre** pasan por el motor de aprobaciones (matriz sección 47).
+
+## 🧾 Facturación electrónica (Dataico)
+
+Módulo **Atria Fiscal** integrado con [Dataico](https://www.dataico.com) como proveedor tecnológico DIAN:
+
+- Al hacer check-out se genera **automáticamente un borrador de factura** desde el folio del huésped (cargos + impuestos).
+- **Sin credenciales** (estado actual): las facturas se numeran localmente (`ATR-1001…`) y quedan en estado `pending`, listas para transmitir.
+- **Con credenciales** (`DATAICO_AUTH_TOKEN` + `DATAICO_ACCOUNT_ID` en `.env`): el botón "Emitir" transmite a la DIAN vía Dataico y guarda el CUFE. `DATAICO_ENV=test|prod` controla el ambiente.
+- Rechazos/errores quedan registrados con el mensaje del proveedor para corrección (sección 16 del documento).
+
+## 👔 Nómina colombiana (Fase 3 — Atria People)
+
+- **Empleados**: expediente con cargo, salario, contrato, afiliaciones (EPS/AFP/ARL/CCF/cesantías) y clase de riesgo ARL. Cambios de salario y terminación de contrato exigen aprobación del dueño.
+- **Novedades**: horas extras diurnas/nocturnas, recargos nocturnos y dominicales/festivos, ausencias, incapacidades, bonos, comisiones, deducciones y préstamos — con flujo de aprobación previo a nómina (sección 21).
+- **Liquidación mensual**: salario proporcional por días, auxilio de transporte (≤ 2 SMMLV), horas extras con tarifas parametrizadas, IBC, salud/pensión 4%, FSP, y costos patronales completos (salud/pensión empleador, ARL por clase, CCF, SENA, ICBF) + provisiones (prima, cesantías, intereses, vacaciones). **Todo sale de la tabla de parámetros legales versionados** — nada quemado en código (criterio 50.9).
+- **Desprendible transparente** por empleado con el detalle de cada concepto (revisable por el contador).
+- **Cerrar nómina exige aprobación del dueño** (matriz 47) — el gerente no puede autoaprobar (verificado por test).
+- **Simulador de liquidación de contrato**: cesantías, intereses, prima proporcional, vacaciones e indemnización por despido sin justa causa.
+
+> Pendiente de fase posterior: transmisión de nómina electrónica DIAN (requiere proveedor tecnológico) y archivo PILA para operador.
 
 ## 🧩 Módulos implementados (Fase 1 + parte de Fase 2)
 
@@ -67,12 +97,12 @@ Guardrails: la IA nunca ofrece reembolsos/descuentos/compensaciones; quejas y so
 
 ## 🗺️ Roadmap (fases siguientes del documento)
 
-- **Fase 2 restante**: facturación electrónica DIAN (requiere contratar proveedor tecnológico), portal huésped completo (pre check-in con carga de documentos/OCR), caja.
-- **Fase 3**: RR. HH., contratos, turnos/recargos, nómina + nómina electrónica DIAN, PILA, prestaciones, SG-SST, compras/inventario. *(El modelo de parámetros legales versionados ya está listo para estos cálculos.)*
+- **Fase 2 restante**: portal huésped completo (pre check-in con carga de documentos/OCR), caja.
+- **Fase 3 restante**: turnos/cuadrantes con marcación, nómina electrónica DIAN (proveedor), archivo PILA, SG-SST, compras/inventario.
 - **Fase 4**: channel manager (OTAs), revenue management, marketing automation, reputación, eventos/corporativos.
 - **Fase 5**: agentes IA por área con function calling sobre la API interna, RAG documental, BI.
 
-Integraciones que requieren credenciales del hotel: proveedor DIAN, pasarela (Wompi/otra), Meta/Instagram, OTAs, operador PILA.
+Integraciones que requieren credenciales del hotel: Dataico (facturación), llaves de pasarelas (Wompi/MercadoPago/Bold/Stripe), Meta/Instagram, OTAs, operador PILA.
 
 ## 🏗️ Arquitectura
 

@@ -24,6 +24,11 @@
         return;
       }
       const info = await res.json();
+      if (info.externalUrl && info.status === 'active') {
+        // Pasarela externa (Wompi/MercadoPago/Bold/Stripe): redirigir al checkout real
+        location.replace(info.externalUrl);
+        return;
+      }
       if (info.status === 'paid') {
         box.innerHTML = `<div class="brand">ATR<b>IA</b></div><div class="brand-sub">PAGO SEGURO</div>
           <p style="text-align:center;font-size:40px">✅</p>

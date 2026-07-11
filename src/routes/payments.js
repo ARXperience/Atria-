@@ -5,9 +5,15 @@ import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
 import { createPaymentLink, paymentLinkUrl } from '../services/payments.js';
 import { requestApproval } from '../services/approvals.js';
+import { gatewaysStatus } from '../services/gateways/index.js';
 import { badRequest, fmtCOP } from '../lib/util.js';
 
 export const paymentsRouter = Router();
+
+// Estado de pasarelas disponibles (para el panel de configuración)
+paymentsRouter.get('/gateways', requirePermission('payments.view'), (_req, res) => {
+  res.json(gatewaysStatus());
+});
 
 paymentsRouter.get('/', requirePermission('payments.view'), async (req, res) => {
   const { propertyId } = req.query;
@@ -21,11 +27,11 @@ paymentsRouter.get('/', requirePermission('payments.view'), async (req, res) => 
 });
 
 paymentsRouter.post('/links', requirePermission('payments.link'), async (req, res) => {
-  const { propertyId, reservationId, concept, amount } = req.body || {};
+  const { propertyId, reservationId, concept, amount, provider } = req.body || {};
   if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
   if (!concept || !(amount > 0)) return badRequest(res, 'concept y amount > 0 requeridos');
   try {
-    res.status(201).json(await createPaymentLink({ propertyId, reservationId: reservationId || null, concept, amount: +amount, createdBy: req.user.id }));
+    res.status(201).json(await createPaymentLink({ propertyId, reservationId: reservationId || null, concept, amount: +amount, createdBy: req.user.id, provider: provider || null }));
   } catch (err) { badRequest(res, err.message); }
 });
 

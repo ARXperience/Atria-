@@ -5,10 +5,69 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+// Parámetros de nómina colombiana (valores de ejemplo — validar con fuentes
+// oficiales). Se aplican también sobre instalaciones existentes (idempotente).
+const PAYROLL_PARAMS = [
+  ['SALUD_EMPLEADO', 0.04, '%', 'Aporte salud empleado'],
+  ['PENSION_EMPLEADO', 0.04, '%', 'Aporte pensión empleado'],
+  ['FSP_UMBRAL_SMMLV', 4, 'SMMLV', 'Umbral Fondo de Solidaridad Pensional'],
+  ['SALUD_EMPLEADOR', 0.085, '%', 'Aporte salud empleador (ver exoneración Ley 1607)'],
+  ['PENSION_EMPLEADOR', 0.12, '%', 'Aporte pensión empleador'],
+  ['CCF', 0.04, '%', 'Caja de compensación familiar'],
+  ['SENA', 0.02, '%', 'Aporte SENA (ver exoneración)'],
+  ['ICBF', 0.03, '%', 'Aporte ICBF (ver exoneración)'],
+  ['ARL_CLASE_1', 0.00522, '%', 'ARL riesgo I'],
+  ['ARL_CLASE_2', 0.01044, '%', 'ARL riesgo II'],
+  ['ARL_CLASE_3', 0.02436, '%', 'ARL riesgo III'],
+  ['ARL_CLASE_4', 0.0435, '%', 'ARL riesgo IV'],
+  ['ARL_CLASE_5', 0.0696, '%', 'ARL riesgo V'],
+  ['HORAS_MES', 220, 'horas', 'Horas mes jornada máxima (parametrizable según Ley 2101)'],
+  ['HORA_EXTRA_NOCTURNA', 0.75, '%', 'Recargo hora extra nocturna'],
+  ['RECARGO_DOMINICAL', 0.8, '%', 'Recargo dominical/festivo (Ley 2466 de 2025, ejemplo)'],
+  ['PRIMA_PCT', 0.0833, '%', 'Provisión prima de servicios'],
+  ['CESANTIAS_PCT', 0.0833, '%', 'Provisión cesantías'],
+  ['INT_CESANTIAS_PCT', 0.01, '%', 'Provisión intereses de cesantías'],
+  ['VACACIONES_PCT', 0.0417, '%', 'Provisión vacaciones'],
+];
+
+async function ensurePayrollParams(companyId) {
+  const year = new Date().getUTCFullYear();
+  for (const [key, value, unit, source] of PAYROLL_PARAMS) {
+    const exists = await prisma.legalParameter.findFirst({ where: { companyId, key } });
+    if (!exists) {
+      await prisma.legalParameter.create({
+        data: { companyId, key, value, unit, validFrom: new Date(Date.UTC(year, 0, 1)), source, updatedBy: 'seed' },
+      });
+    }
+  }
+}
+
+async function ensureDemoEmployees(companyId, propertyId) {
+  const count = await prisma.employee.count({ where: { companyId } });
+  if (count > 0) return;
+  const demo = [
+    ['Laura Rodríguez', '52111222', 'Recepcionista', 'recepción', 1800000, 1],
+    ['Carlos Muñoz', '79333444', 'Camarero de pisos', 'housekeeping', 1623500, 2],
+  ];
+  for (const [fullName, doc, position, area, salary, riskClass] of demo) {
+    await prisma.employee.create({
+      data: {
+        companyId, propertyId, fullName, documentNumber: doc, position, area,
+        salary, riskClass, hireDate: new Date(Date.UTC(new Date().getUTCFullYear(), 0, 15)),
+        eps: 'EPS Sura', afp: 'Porvenir', arl: 'ARL Sura', ccf: 'Compensar', cesantiasFund: 'Porvenir',
+      },
+    });
+  }
+  console.log('   Empleados demo creados (Laura Rodríguez, Carlos Muñoz).');
+}
+
 async function main() {
   const existing = await prisma.company.findFirst();
   if (existing) {
-    console.log('Seed ya aplicado (empresa existente). Nada que hacer.');
+    await ensurePayrollParams(existing.id);
+    const property = await prisma.property.findFirst({ where: { companyId: existing.id } });
+    if (property) await ensureDemoEmployees(existing.id, property.id);
+    console.log('Seed incremental aplicado (parámetros de nómina y empleados demo).');
     return;
   }
 
@@ -98,6 +157,9 @@ async function main() {
       data: { companyId: company.id, key, value, unit, validFrom: new Date(Date.UTC(year, 0, 1)), source, updatedBy: 'seed' },
     });
   }
+
+  await ensurePayrollParams(company.id);
+  await ensureDemoEmployees(company.id, property.id);
 
   console.log('✅ Seed completado.');
   console.log(`   Empresa: ${company.name}`);

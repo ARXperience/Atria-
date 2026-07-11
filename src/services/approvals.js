@@ -62,6 +62,17 @@ const executors = {
     const { checkOut } = await import('./reservations.js');
     return checkOut(payload.reservationId, { allowBalance: true });
   },
+  async payroll_close(payload) {
+    const { closePeriod } = await import('./payroll.js');
+    return closePeriod(payload.periodId, { user: { name: 'Aprobación de dueño' } });
+  },
+  async employee_sensitive_change(payload) {
+    const data = {};
+    if (payload.salary !== undefined) data.salary = payload.salary;
+    if (payload.status) data.status = payload.status;
+    if (payload.endDate) data.endDate = new Date(payload.endDate);
+    return prisma.employee.update({ where: { id: payload.employeeId }, data });
+  },
 };
 
 export async function decideApproval(requestId, { approve, user, note = null }) {

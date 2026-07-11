@@ -10,13 +10,15 @@ import { logger } from '../lib/logger.js';
 
 export const publicRouter = Router();
 
-// ---- Webhook de pasarela de pagos (Wompi o simulador) ----
+// ---- Webhook de pasarelas (mock, wompi, mercadopago, bold, stripe) ----
 publicRouter.post('/webhooks/payments/:provider', async (req, res) => {
   try {
-    const result = await handleGatewayWebhook(req.params.provider, req.body, req.headers);
+    const result = await handleGatewayWebhook(req.params.provider, req.body, req.headers, {
+      query: req.query, rawBody: req.rawBody || null,
+    });
     res.json({ received: true, result: result?.id || result });
   } catch (err) {
-    logger.warn({ err: err.message }, 'payment webhook rejected');
+    logger.warn({ err: err.message, provider: req.params.provider }, 'payment webhook rejected');
     res.status(400).json({ error: err.message });
   }
 });
@@ -31,6 +33,7 @@ publicRouter.get('/pay/:token/info', async (req, res) => {
   res.json({
     concept: link.concept, amount: link.amount, currency: link.currency,
     status: link.status, expiresAt: link.expiresAt, provider: link.provider,
+    externalUrl: link.externalUrl || null,
     hotel: link.reservation?.property?.name || null,
     reservationCode: link.reservation?.code || null,
     guestName: link.reservation?.guest?.fullName || null,
@@ -38,8 +41,11 @@ publicRouter.get('/pay/:token/info', async (req, res) => {
 });
 
 publicRouter.post('/pay/:token/confirm', async (req, res) => {
-  // Solo válido en modo mock: simula la aprobación de la pasarela.
+  // Solo válido para links del simulador: las pasarelas reales confirman por webhook.
   try {
+    const link = await prisma.paymentLink.findUnique({ where: { token: req.params.token } });
+    if (!link) return res.status(404).json({ error: 'Link de pago no encontrado' });
+    if (link.provider !== 'mock') return res.status(400).json({ error: `Este cobro se procesa con ${link.provider}; usa el checkout de la pasarela.` });
     const result = await handleGatewayWebhook('mock', { reference: req.params.token, method: req.body?.method || 'card' });
     res.json({ ok: true, paymentId: result?.id || null });
   } catch (err) {

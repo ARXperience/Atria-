@@ -12,13 +12,15 @@ const PERMISSIONS = {
   MANAGER: [
     'dashboard.view', 'reservations.*', 'booking.*', 'rooms.*', 'guests.*', 'crm.*', 'inbox.*',
     'payments.*', 'housekeeping.*', 'maintenance.*', 'compliance.*', 'approvals.*', 'audit.view',
-    'settings.view', 'whatsapp.*', 'notifications.*', 'users.view',
+    'settings.view', 'whatsapp.*', 'notifications.*', 'users.view', 'users.manage', 'settings.edit',
+    'hr.*', 'payroll.view', 'payroll.manage', 'invoices.*',
   ],
   FRONTDESK: [
     'dashboard.view', 'reservations.*', 'booking.*', 'rooms.view', 'rooms.status', 'guests.*',
     'inbox.*', 'payments.view', 'payments.link', 'payments.manual_request', 'housekeeping.view',
     'housekeeping.create', 'maintenance.create', 'maintenance.view', 'compliance.tra', 'compliance.sire',
     'compliance.view', 'notifications.*', 'whatsapp.view', 'crm.view', 'crm.create',
+    'invoices.view', 'invoices.create',
   ],
   SALES: [
     'dashboard.view', 'crm.*', 'inbox.*', 'booking.*', 'reservations.view', 'reservations.create',
@@ -28,10 +30,10 @@ const PERMISSIONS = {
   MAINTENANCE: ['maintenance.*', 'rooms.view', 'notifications.*'],
   ACCOUNTING: [
     'dashboard.view', 'payments.*', 'reservations.view', 'compliance.view', 'audit.view',
-    'approvals.view', 'notifications.*',
+    'approvals.view', 'notifications.*', 'invoices.*', 'payroll.view', 'hr.view',
   ],
-  HR: ['dashboard.view', 'notifications.*', 'audit.view'],
-  AUDITOR: ['audit.view', 'dashboard.view', 'reservations.view', 'payments.view', 'compliance.view', 'approvals.view'],
+  HR: ['dashboard.view', 'notifications.*', 'audit.view', 'hr.*', 'payroll.*'],
+  AUDITOR: ['audit.view', 'dashboard.view', 'reservations.view', 'payments.view', 'compliance.view', 'approvals.view', 'invoices.view', 'payroll.view', 'hr.view'],
 };
 
 export function hasPermission(role, perm) {

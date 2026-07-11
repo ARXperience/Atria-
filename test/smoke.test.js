@@ -268,6 +268,133 @@ async function main() {
       assert.equal(res.status, 403);
     });
 
+    // ===== Multi-pasarela =====
+    await test('estado de pasarelas: mock configurada, resto sin llaves', async () => {
+      const { data } = await api('/api/payments/gateways');
+      const names = data.map(g => g.name);
+      for (const n of ['mock', 'wompi', 'mercadopago', 'bold', 'stripe']) assert.ok(names.includes(n), `falta ${n}`);
+      assert.ok(data.find(g => g.name === 'mock').configured);
+      assert.equal(data.find(g => g.name === 'stripe').configured, false);
+    });
+
+    await test('crear link con pasarela sin configurar → error claro', async () => {
+      const { status, data } = await api('/api/payments/links', {
+        method: 'POST',
+        body: { propertyId, concept: 'Prueba stripe', amount: 100000, provider: 'stripe' },
+      });
+      assert.equal(status, 400);
+      assert.match(data.error, /stripe/i);
+    });
+
+    await test('webhook de pasarela desconocida → 400', async () => {
+      const { status } = await api('/api/public/webhooks/payments/noexiste', { method: 'POST', body: {} });
+      assert.equal(status, 400);
+    });
+
+    // ===== Atria Fiscal (Dataico en modo borrador) =====
+    let invoiceId;
+    await test('check-out generó borrador de factura automático', async () => {
+      const { data } = await api(`/api/invoices?propertyId=${propertyId}`);
+      assert.equal(data.dataicoConfigured, false);
+      const inv = data.invoices.find(i => i.reservation?.code === reservation.code);
+      assert.ok(inv, 'debe existir borrador para la reserva con check-out');
+      assert.equal(inv.status, 'draft');
+      assert.ok(inv.total > 0);
+      invoiceId = inv.id;
+    });
+
+    await test('emitir sin Dataico → numeración local en estado pending', async () => {
+      const { status, data } = await api(`/api/invoices/${invoiceId}/issue`, { method: 'POST' });
+      assert.equal(status, 200);
+      assert.equal(data.status, 'pending');
+      assert.match(data.fullNumber, /^ATR-\d+/);
+    });
+
+    // ===== Atria People: nómina (Fase 3) =====
+    let employeeId, periodId;
+    await test('crear empleado', async () => {
+      const { status, data } = await api('/api/hr/employees', {
+        method: 'POST',
+        body: {
+          propertyId, fullName: 'Pedro Nómina Test', documentNumber: '900100200',
+          position: 'Auxiliar de cocina', area: 'restaurante', salary: 1623500,
+          hireDate: '2026-01-01', riskClass: 2, eps: 'Sanitas', afp: 'Protección', arl: 'Positiva',
+        },
+      });
+      assert.equal(status, 201);
+      employeeId = data.id;
+    });
+
+    await test('registrar y aprobar novedad de horas extras', async () => {
+      const { status, data } = await api('/api/hr/novelties', {
+        method: 'POST',
+        body: { propertyId, employeeId, type: 'overtime_day', date: futureDay(-5), hours: 10 },
+      });
+      assert.equal(status, 201);
+      const dec = await api(`/api/hr/novelties/${data.id}/decide`, { method: 'POST', body: { approve: true } });
+      assert.equal(dec.status, 200);
+    });
+
+    await test('abrir y calcular periodo de nómina', async () => {
+      const now = new Date();
+      const { status, data } = await api('/api/hr/payroll/periods', {
+        method: 'POST', body: { propertyId, year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 },
+      });
+      assert.equal(status, 201);
+      periodId = data.id;
+      const calc = await api(`/api/hr/payroll/periods/${periodId}/calculate`, { method: 'POST' });
+      assert.equal(calc.status, 200);
+      assert.ok(calc.data.employees >= 3, 'debe liquidar los empleados demo + el creado');
+    });
+
+    await test('liquidación correcta: salud/pensión 4% y auxilio de transporte', async () => {
+      const { data: p } = await api(`/api/hr/payroll/periods/${periodId}`);
+      const item = p.items.find(i => i.employee.fullName === 'Pedro Nómina Test');
+      assert.ok(item, 'debe existir item de Pedro');
+      const b = item.breakdown;
+      const health = b.deductions.find(d => d.concept === 'Salud empleado');
+      assert.ok(Math.abs(health.amount - Math.round(b.IBC * 0.04)) <= 1, 'salud = 4% del IBC');
+      assert.ok(b.earned.some(e => e.concept === 'Auxilio de transporte'), 'salario mínimo recibe auxilio de transporte');
+      assert.ok(b.earned.some(e => e.concept === 'Hora extra diurna'), 'debe incluir las horas extras aprobadas');
+      assert.ok(item.net > 0 && item.net < item.earned);
+      assert.ok(item.employerCost > 0, 'debe calcular costo patronal + provisiones');
+    });
+
+    await test('cerrar nómina exige aprobación del DUEÑO (gerente no basta)', async () => {
+      const { status, data } = await api(`/api/hr/payroll/periods/${periodId}/close`, { method: 'POST' });
+      assert.equal(status, 202);
+      const approvalId2 = data.pendingApproval.id;
+      // El gerente intenta aprobar → rechazado por rango
+      const asManager = await api(`/api/approvals/${approvalId2}/decide`, { method: 'POST', body: { approve: true } });
+      assert.equal(asManager.status, 400);
+      // El dueño aprueba → periodo cerrado
+      const { data: ownerLogin } = await api('/api/auth/login', { method: 'POST', body: { email: 'owner@atria.co', password: 'atria2026' } });
+      const res = await fetch(`${BASE}/api/approvals/${approvalId2}/decide`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${ownerLogin.token}` },
+        body: JSON.stringify({ approve: true }),
+      });
+      assert.equal(res.status, 200);
+      const { data: period } = await api(`/api/hr/payroll/periods/${periodId}`);
+      assert.equal(period.status, 'closed');
+    });
+
+    await test('simulador de liquidación de contrato', async () => {
+      const { status, data } = await api('/api/hr/liquidations/simulate', {
+        method: 'POST', body: { employeeId, cause: 'sin_justa_causa' },
+      });
+      assert.equal(status, 200);
+      assert.ok(data.total > 0);
+      assert.ok(data.items.some(i => /Cesantías/.test(i.concept)));
+      assert.ok(data.items.some(i => /Indemnización/.test(i.concept)), 'despido sin justa causa incluye indemnización');
+    });
+
+    await test('cambio de salario requiere aprobación del dueño', async () => {
+      const { status, data } = await api(`/api/hr/employees/${employeeId}`, { method: 'PATCH', body: { salary: 2000000 } });
+      assert.equal(status, 202);
+      assert.ok(data.pendingApproval.requiredRole === 'OWNER');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

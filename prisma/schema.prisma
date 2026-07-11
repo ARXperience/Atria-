@@ -64,6 +64,9 @@ model Property {
   notifications Notification[]
   traRecords    TraRecord[]
   sireReports   SireReport[]
+  invoices      Invoice[]
+  employees     Employee[]
+  payrollPeriods PayrollPeriod[]
 }
 
 model User {
@@ -267,6 +270,7 @@ model Reservation {
   paymentLinks PaymentLink[]
   traRecords  TraRecord[]
   sireReports SireReport[]
+  invoices    Invoice[]
 
   @@index([propertyId, status])
   @@index([propertyId, checkIn])
@@ -308,7 +312,8 @@ model PaymentLink {
   amount       Float
   currency     String   @default("COP")
   status       String   @default("active") // active | paid | expired | cancelled
-  provider     String   @default("mock")
+  provider     String   @default("mock")   // mock | wompi | mercadopago | bold | stripe
+  externalUrl  String?  // URL de checkout de la pasarela externa (si aplica)
   expiresAt    DateTime?
   paidAt       DateTime?
   createdBy    String?
@@ -334,6 +339,132 @@ model Payment {
   createdAt     DateTime @default(now())
 
   @@index([propertyId, createdAt])
+}
+
+// ===================== Atria Fiscal (facturación — Dataico) =====================
+
+model Invoice {
+  id            String   @id @default(cuid())
+  propertyId    String
+  property      Property @relation(fields: [propertyId], references: [id])
+  reservationId String?
+  reservation   Reservation? @relation(fields: [reservationId], references: [id])
+  prefix        String?
+  number        Int?
+  fullNumber    String?  // p.ej. ATR-1001
+  customerName  String
+  customerDoc   String?
+  customerEmail String?
+  items         String   // JSON [{description, qty, price, taxRate, taxAmount, total}]
+  subtotal      Float
+  tax           Float
+  total         Float
+  status        String   @default("draft") // draft | pending | validated | rejected | error
+  provider      String   @default("dataico")
+  providerRef   String?  // uuid Dataico
+  cufe          String?
+  errorMsg      String?
+  issuedAt      DateTime?
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([propertyId, status])
+}
+
+// ===================== Atria People (RR. HH. + Nómina) =====================
+
+model Employee {
+  id             String   @id @default(cuid())
+  companyId      String
+  propertyId     String
+  property       Property @relation(fields: [propertyId], references: [id])
+  fullName       String
+  documentType   String   @default("CC")
+  documentNumber String
+  email          String?
+  phone          String?
+  position       String   // cargo
+  area           String?  // recepción, housekeeping, cocina...
+  contractType   String   @default("indefinido") // indefinido | fijo | obra | aprendizaje
+  salary         Float    // salario mensual base
+  hireDate       DateTime
+  endDate        DateTime?
+  eps            String?
+  afp            String?
+  arl            String?
+  ccf            String?
+  cesantiasFund  String?
+  riskClass      Int      @default(1) // clase de riesgo ARL 1-5
+  bankAccount    String?
+  status         String   @default("active") // active | terminated
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  novelties      PayrollNovelty[]
+  payrollItems   PayrollItem[]
+
+  @@unique([companyId, documentNumber])
+  @@index([propertyId, status])
+}
+
+// Novedades de nómina: horas extras, recargos, ausencias, bonos, deducciones
+model PayrollNovelty {
+  id         String   @id @default(cuid())
+  propertyId String
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  type       String   // overtime_day | overtime_night | night_surcharge | sunday_holiday | absence | incapacity | vacation | bonus | commission | deduction | loan
+  date       DateTime
+  hours      Float?   // para horas extras/recargos
+  days       Float?   // para ausencias/incapacidades/vacaciones
+  amount     Float?   // para bonos/comisiones/deducciones/préstamos
+  notes      String?
+  status     String   @default("pending") // pending | approved | rejected
+  approvedBy String?
+  periodId   String?  // periodo en que fue liquidada
+  createdAt  DateTime @default(now())
+
+  @@index([propertyId, status])
+  @@index([employeeId, date])
+}
+
+model PayrollPeriod {
+  id          String   @id @default(cuid())
+  companyId   String
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  year        Int
+  month       Int      // 1-12
+  status      String   @default("open") // open | calculated | closed
+  totalEarned Float?
+  totalDeductions Float?
+  totalNet    Float?
+  totalEmployerCost Float?
+  calculatedAt DateTime?
+  closedAt    DateTime?
+  closedBy    String?
+  createdAt   DateTime @default(now())
+  items       PayrollItem[]
+
+  @@unique([propertyId, year, month])
+}
+
+model PayrollItem {
+  id         String   @id @default(cuid())
+  periodId   String
+  period     PayrollPeriod @relation(fields: [periodId], references: [id])
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  daysWorked Float
+  breakdown  String   // JSON detallado: devengados, deducciones, costos patronales, provisiones
+  earned     Float    // total devengado
+  deductions Float    // total deducciones empleado
+  net        Float    // neto a pagar
+  employerCost Float  // costo patronal total (seguridad social + parafiscales + provisiones)
+  createdAt  DateTime @default(now())
+
+  @@unique([periodId, employeeId])
 }
 
 // ===================== Atria Connect (CRM + Inbox) =====================

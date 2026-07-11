@@ -14,4 +14,21 @@ export const config = {
     privateKey: process.env.WOMPI_PRIVATE_KEY || '',
     eventsSecret: process.env.WOMPI_EVENTS_SECRET || '',
   },
+  mercadopago: {
+    accessToken: process.env.MP_ACCESS_TOKEN || '',
+  },
+  bold: {
+    apiKey: process.env.BOLD_API_KEY || '',
+    secretKey: process.env.BOLD_SECRET_KEY || '',
+  },
+  stripe: {
+    secretKey: process.env.STRIPE_SECRET_KEY || '',
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+  },
+  dataico: {
+    authToken: process.env.DATAICO_AUTH_TOKEN || '',
+    accountId: process.env.DATAICO_ACCOUNT_ID || '',
+    invoicePrefix: process.env.DATAICO_INVOICE_PREFIX || 'ATR',
+    env: process.env.DATAICO_ENV || 'test', // test | prod
+  },
 };
