@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pago seguro — Atria</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="login-wrap"><div class="login-card" id="box">
+    <div class="brand">ATR<b>IA</b></div>
+    <div class="brand-sub">PAGO SEGURO</div>
+    <p class="muted" style="text-align:center">Cargando información del pago…</p>
+  </div></div>
+  <script>
+    const token = location.pathname.split('/').pop();
+    const cop = n => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    async function load() {
+      const res = await fetch(`/api/public/pay/${token}/info`);
+      const box = document.getElementById('box');
+      if (!res.ok) {
+        box.innerHTML += '<p style="color:var(--red);text-align:center">Link de pago no encontrado o vencido.</p>';
+        return;
+      }
+      const info = await res.json();
+      if (info.status === 'paid') {
+        box.innerHTML = `<div class="brand">ATR<b>IA</b></div><div class="brand-sub">PAGO SEGURO</div>
+          <p style="text-align:center;font-size:40px">✅</p>
+          <p style="text-align:center">Este pago ya fue procesado. ¡Gracias!</p>`;
+        return;
+      }
+      box.innerHTML = `
+        <div class="brand">ATR<b>IA</b></div><div class="brand-sub">PAGO SEGURO</div>
+        ${info.hotel ? `<p style="text-align:center;margin-bottom:4px">${esc(info.hotel)}</p>` : ''}
+        ${info.reservationCode ? `<p class="muted" style="text-align:center;font-size:12px">Reserva ${esc(info.reservationCode)}${info.guestName ? ' · ' + esc(info.guestName) : ''}</p>` : ''}
+        <div class="card mt" style="text-align:center">
+          <div class="muted" style="font-size:12px">${esc(info.concept)}</div>
+          <div style="font-size:30px;font-weight:600;margin-top:6px">${cop(info.amount)}</div>
+        </div>
+        <label>Método de pago</label>
+        <select id="method"><option value="card">Tarjeta de crédito/débito</option><option value="pse">PSE</option><option value="nequi">Nequi</option></select>
+        <button class="btn mt" style="width:100%" id="payBtn">Pagar ${cop(info.amount)}</button>
+        <p class="muted" style="font-size:11px;text-align:center;margin-top:12px">${info.provider === 'mock' ? 'Ambiente de pruebas: el pago se simula y confirma la reserva.' : 'Procesado por pasarela certificada.'}</p>`;
+      document.getElementById('payBtn').onclick = async () => {
+        const btn = document.getElementById('payBtn');
+        btn.disabled = true; btn.textContent = 'Procesando…';
+        const r = await fetch(`/api/public/pay/${token}/confirm`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ method: document.getElementById('method').value }),
+        });
+        const data = await r.json();
+        if (r.ok) {
+          box.innerHTML = `<div class="brand">ATR<b>IA</b></div><div class="brand-sub">PAGO SEGURO</div>
+            <p style="text-align:center;font-size:40px">🎉</p>
+            <p style="text-align:center"><b>¡Pago aprobado!</b><br>Tu reserva quedó confirmada. Recibirás el voucher por el canal donde reservaste.</p>`;
+        } else {
+          btn.disabled = false; btn.textContent = 'Reintentar';
+          alert(data.error || 'Error procesando el pago');
+        }
+      };
+    }
+    load();
+  </script>
+</body>
+</html>

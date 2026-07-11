@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mi reserva — Atria</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="login-wrap"><div class="login-card" id="box" style="width:440px">
+    <div class="brand">ATR<b>IA</b></div>
+    <div class="brand-sub">PORTAL DEL HUÉSPED</div>
+    <p class="muted" style="text-align:center">Cargando reserva…</p>
+  </div></div>
+  <script>
+    const code = decodeURIComponent(location.pathname.split('/').pop());
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const cop = n => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
+    const STATUS = { tentative: 'Pendiente de pago', confirmed: 'Confirmada ✅', checked_in: 'En estadía 🏨', checked_out: 'Finalizada', cancelled: 'Cancelada', expired: 'Vencida' };
+
+    fetch(`/api/public/guest/reservation/${encodeURIComponent(code)}`).then(async res => {
+      const box = document.getElementById('box');
+      if (!res.ok) { box.innerHTML += '<p style="color:var(--red);text-align:center">Reserva no encontrada.</p>'; return; }
+      const r = await res.json();
+      box.innerHTML = `
+        <div class="brand">ATR<b>IA</b></div><div class="brand-sub">PORTAL DEL HUÉSPED</div>
+        <div class="card">
+          <h3>${esc(r.hotel)} · ${esc(r.city || '')}</h3>
+          <table>
+            <tr><td class="muted">Reserva</td><td><b>${esc(r.code)}</b></td></tr>
+            <tr><td class="muted">Estado</td><td>${STATUS[r.status] || esc(r.status)}</td></tr>
+            <tr><td class="muted">Huésped</td><td>${esc(r.guestName)}</td></tr>
+            <tr><td class="muted">Llegada</td><td>${esc(r.checkIn)} desde ${esc(r.checkInTime)}</td></tr>
+            <tr><td class="muted">Salida</td><td>${esc(r.checkOut)} hasta ${esc(r.checkOutTime)}</td></tr>
+            <tr><td class="muted">Noches / Personas</td><td>${r.nights} noche(s) · ${r.adults + r.children} persona(s)</td></tr>
+            <tr><td class="muted">Total</td><td>${cop(r.total)}</td></tr>
+            <tr><td class="muted">Pagado</td><td>${cop(r.paid)}</td></tr>
+            <tr><td class="muted">Saldo</td><td><b>${cop(r.balance)}</b></td></tr>
+          </table>
+          ${r.pendingLink && r.balance > 0 ? `<a href="/pay/${r.pendingLink}"><button class="btn mt" style="width:100%">Pagar ahora</button></a>` : ''}
+        </div>`;
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,483 @@
+// Atria Hospitality OS — esquema de datos (Atria Core + PMS + Booking + Connect + Pay + Compliance)
+// SQLite por defecto; compatible con PostgreSQL cambiando datasource.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ===================== Atria Core =====================
+
+model Company {
+  id          String   @id @default(cuid())
+  name        String
+  nit         String   @unique
+  legalRep    String?
+  address     String?
+  city        String?
+  email       String?
+  phone       String?
+  fiscalRegime String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  properties  Property[]
+  users       User[]
+  legalParameters LegalParameter[]
+}
+
+model Property {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  name        String
+  address     String?
+  city        String?
+  rnt         String?          // Registro Nacional de Turismo
+  rntExpiresAt DateTime?
+  checkInTime  String  @default("15:00")
+  checkOutTime String  @default("12:00")
+  currency    String   @default("COP")
+  taxRate     Float    @default(0.19) // IVA por defecto, parametrizable
+  timezone    String   @default("America/Bogota")
+  whatsappNumber String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roomTypes     RoomType[]
+  rooms         Room[]
+  ratePlans     RatePlan[]
+  reservations  Reservation[]
+  guests        Guest[]
+  leads         Lead[]
+  conversations Conversation[]
+  hkTasks       HousekeepingTask[]
+  mtOrders     MaintenanceOrder[]
+  payments      Payment[]
+  paymentLinks  PaymentLink[]
+  approvals     ApprovalRequest[]
+  notifications Notification[]
+  traRecords    TraRecord[]
+  sireReports   SireReport[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id])
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   // OWNER | MANAGER | FRONTDESK | SALES | HOUSEKEEPING | MAINTENANCE | ACCOUNTING | HR | AUDITOR
+  propertyIds  String   @default("*") // "*" = todas las sedes, o lista CSV de ids
+  active       Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Parámetros legales versionados por vigencia (sección 3 y 6 del documento funcional)
+model LegalParameter {
+  id         String    @id @default(cuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id])
+  key        String    // p.ej. SMMLV, UVT, AUX_TRANSPORTE, RECARGO_NOCTURNO, FONTUR_TARIFA
+  value      Float
+  unit       String?   // COP, %, horas
+  validFrom  DateTime
+  validTo    DateTime?
+  source     String?   // fuente normativa
+  updatedBy  String?
+  createdAt  DateTime  @default(now())
+
+  @@index([companyId, key, validFrom])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  companyId String?
+  propertyId String?
+  userId    String?
+  userName  String?
+  actor     String   @default("human") // human | ai | system
+  action    String   // p.ej. reservation.confirmed
+  entity    String?
+  entityId  String?
+  before    String?  // JSON
+  after     String?  // JSON
+  reason    String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([companyId, createdAt])
+}
+
+// Motor de aprobaciones humanas (sección 47: matriz de autorización)
+model ApprovalRequest {
+  id          String   @id @default(cuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  type        String   // manual_payment | refund | discount | rate_override | room_block | reservation_no_deposit | cancellation
+  summary     String   // resumen de impacto legible
+  payload     String   // JSON con la acción a ejecutar
+  requestedBy String?
+  requestedByName String?
+  requiredRole String  @default("MANAGER") // rol mínimo que aprueba
+  status      String   @default("pending") // pending | approved | rejected | expired
+  decidedBy   String?
+  decidedByName String?
+  decisionNote String?
+  decidedAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([propertyId, status])
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+  audienceRole String @default("MANAGER") // rol destinatario
+  title      String
+  body       String?
+  severity   String   @default("info") // info | warning | critical
+  entity     String?
+  entityId   String?
+  readAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([propertyId, readAt])
+}
+
+// ===================== Atria PMS =====================
+
+model RoomType {
+  id          String   @id @default(cuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  name        String   // Estándar, Superior, Suite...
+  code        String
+  capacity    Int      @default(2)
+  baseRate    Float    // tarifa base por noche (COP)
+  description String?
+  amenities   String?  // CSV
+  active      Boolean  @default(true)
+  rooms       Room[]
+  ratePlans   RatePlan[]
+
+  @@unique([propertyId, code])
+}
+
+model Room {
+  id          String   @id @default(cuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  roomTypeId  String
+  roomType    RoomType @relation(fields: [roomTypeId], references: [id])
+  number      String
+  floor       String?
+  status      String   @default("clean") // clean | dirty | inspected | occupied | out_of_service
+  notes       String?
+  active      Boolean  @default(true)
+  reservations Reservation[]
+  hkTasks     HousekeepingTask[]
+  mtOrders    MaintenanceOrder[]
+
+  @@unique([propertyId, number])
+}
+
+model RatePlan {
+  id          String   @id @default(cuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  roomTypeId  String
+  roomType    RoomType @relation(fields: [roomTypeId], references: [id])
+  name        String   // Flexible, No reembolsable, Corporativa...
+  code        String
+  price       Float    // por noche
+  refundable  Boolean  @default(true)
+  minNights   Int      @default(1)
+  depositPct  Float    @default(0.5) // anticipo requerido
+  validFrom   DateTime?
+  validTo     DateTime?
+  active      Boolean  @default(true)
+
+  @@unique([propertyId, code])
+}
+
+model Guest {
+  id          String   @id @default(cuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  fullName    String
+  documentType String? // CC | CE | PASSPORT | ...
+  documentNumber String?
+  nationality String?  @default("CO")
+  phone       String?
+  email       String?
+  city        String?
+  notes       String?
+  marketingConsent Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  reservations Reservation[]
+  leads        Lead[]
+
+  @@index([propertyId, phone])
+  @@index([propertyId, documentNumber])
+}
+
+model Reservation {
+  id          String   @id @default(cuid())
+  code        String   @unique // localizador legible p.ej. ATR-2026-000123
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  guestId     String
+  guest       Guest    @relation(fields: [guestId], references: [id])
+  roomId      String?
+  room        Room?    @relation(fields: [roomId], references: [id])
+  roomTypeId  String
+  ratePlanId  String?
+  checkIn     DateTime // fecha llegada (00:00 local)
+  checkOut    DateTime // fecha salida
+  adults      Int      @default(2)
+  children    Int      @default(0)
+  nights      Int
+  nightlyRate Float
+  subtotal    Float
+  taxes       Float
+  total       Float
+  depositRequired Float @default(0)
+  channel     String   @default("direct") // direct | whatsapp | web | walkin | ota
+  status      String   @default("tentative") // tentative | confirmed | checked_in | checked_out | cancelled | no_show | expired
+  holdExpiresAt DateTime?
+  notes       String?
+  createdBy   String?  // userId o "ai"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  folio       Folio?
+  payments    Payment[]
+  paymentLinks PaymentLink[]
+  traRecords  TraRecord[]
+  sireReports SireReport[]
+
+  @@index([propertyId, status])
+  @@index([propertyId, checkIn])
+}
+
+model Folio {
+  id            String   @id @default(cuid())
+  reservationId String   @unique
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+  status        String   @default("open") // open | closed
+  openedAt      DateTime @default(now())
+  closedAt      DateTime?
+  charges       FolioCharge[]
+}
+
+model FolioCharge {
+  id        String   @id @default(cuid())
+  folioId   String
+  folio     Folio    @relation(fields: [folioId], references: [id])
+  concept   String   // alojamiento | restaurante | minibar | room_service | daño | otro
+  description String?
+  amount    Float
+  taxAmount Float    @default(0)
+  postedBy  String?
+  voided    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// ===================== Atria Pay =====================
+
+model PaymentLink {
+  id           String   @id @default(cuid())
+  propertyId   String
+  property     Property @relation(fields: [propertyId], references: [id])
+  reservationId String?
+  reservation  Reservation? @relation(fields: [reservationId], references: [id])
+  token        String   @unique
+  concept      String
+  amount       Float
+  currency     String   @default("COP")
+  status       String   @default("active") // active | paid | expired | cancelled
+  provider     String   @default("mock")
+  expiresAt    DateTime?
+  paidAt       DateTime?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  propertyId    String
+  property      Property @relation(fields: [propertyId], references: [id])
+  reservationId String?
+  reservation   Reservation? @relation(fields: [reservationId], references: [id])
+  paymentLinkId String?
+  amount        Float
+  currency      String   @default("COP")
+  method        String   // card | pse | cash | transfer | dataphone | mock
+  provider      String?  // mock | wompi | manual
+  providerRef   String?  // id transacción pasarela
+  status        String   @default("approved") // pending | approved | rejected | refunded
+  kind          String   @default("payment") // payment | deposit | refund
+  registeredBy  String?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  @@index([propertyId, createdAt])
+}
+
+// ===================== Atria Connect (CRM + Inbox) =====================
+
+model Lead {
+  id          String   @id @default(cuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  guestId     String?
+  guest       Guest?   @relation(fields: [guestId], references: [id])
+  name        String?
+  phone       String?
+  email       String?
+  channel     String   @default("whatsapp") // whatsapp | web | instagram | email | phone
+  intent      String?  // reserva | evento | queja | info
+  checkIn     DateTime?
+  checkOut    DateTime?
+  adults      Int?
+  score       Int      @default(0)
+  stage       String   @default("new") // new | qualified | quoted | won | lost
+  lostReason  String?
+  assignedTo  String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([propertyId, stage])
+}
+
+model Conversation {
+  id          String   @id @default(cuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id])
+  channel     String   // whatsapp | webchat
+  contactId   String   // jid whatsapp o identificador webchat
+  contactName String?
+  contactPhone String?
+  status      String   @default("open") // open | closed
+  aiEnabled   Boolean  @default(true)   // false = tomada por humano
+  assignedTo  String?
+  lastMessageAt DateTime @default(now())
+  context     String?  // JSON: estado conversacional del bot (fechas, cotización, etc.)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  messages    Message[]
+
+  @@unique([propertyId, channel, contactId])
+  @@index([propertyId, lastMessageAt])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  direction      String   // in | out
+  sender         String   // guest | ai | nombre de usuario
+  body           String
+  intent         String?
+  createdAt      DateTime @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+// ===================== Atria Ops =====================
+
+model HousekeepingTask {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+  roomId     String
+  room       Room     @relation(fields: [roomId], references: [id])
+  type       String   @default("checkout_clean") // checkout_clean | stayover | deep_clean | request
+  priority   String   @default("normal") // low | normal | high | urgent
+  status     String   @default("pending") // pending | in_progress | done | inspected
+  assignedTo String?
+  notes      String?
+  createdAt  DateTime @default(now())
+  completedAt DateTime?
+
+  @@index([propertyId, status])
+}
+
+model MaintenanceOrder {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+  roomId     String?
+  room       Room?    @relation(fields: [roomId], references: [id])
+  title      String
+  description String?
+  priority   String   @default("medium") // low | medium | high | critical
+  status     String   @default("open") // open | in_progress | resolved | closed
+  blocksRoom Boolean  @default(false)
+  reportedBy String?
+  assignedTo String?
+  cost       Float?
+  createdAt  DateTime @default(now())
+  resolvedAt DateTime?
+
+  @@index([propertyId, status])
+}
+
+// ===================== Atria Compliance =====================
+
+// Tarjeta de Registro de Alojamiento (TRA)
+model TraRecord {
+  id            String   @id @default(cuid())
+  propertyId    String
+  property      Property @relation(fields: [propertyId], references: [id])
+  reservationId String
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+  guestName     String
+  documentType  String?
+  documentNumber String?
+  nationality   String?
+  originCity    String?
+  destinationCity String?
+  travelReason  String?  // negocios | turismo | evento | otro
+  isMainGuest   Boolean  @default(true)
+  status        String   @default("incomplete") // incomplete | complete
+  missingFields String?  // CSV de campos faltantes
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([propertyId, status])
+}
+
+// Reportes SIRE para extranjeros
+model SireReport {
+  id            String   @id @default(cuid())
+  propertyId    String
+  property      Property @relation(fields: [propertyId], references: [id])
+  reservationId String
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+  guestName     String
+  nationality   String
+  documentType  String?
+  documentNumber String?
+  status        String   @default("pending") // pending | prepared | reported | error | not_applicable
+  reportedBy    String?
+  reportedAt    DateTime?
+  supportNote   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([propertyId, status])
+}

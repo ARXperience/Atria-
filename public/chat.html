@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chat — Atria</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="login-wrap"><div class="login-card" style="width:460px;display:flex;flex-direction:column;height:80vh">
+    <div class="brand" style="font-size:20px">ATR<b>IA</b></div>
+    <div class="brand-sub">ASISTENTE VIRTUAL</div>
+    <div class="chat" style="flex:1;border:none;background:transparent;min-height:0">
+      <div class="chat-body" id="body" style="padding:0">
+        <div class="msg in">¡Hola! 👋 Soy Atria. Puedo ayudarte a cotizar y reservar. Cuéntame fechas y número de personas.</div>
+      </div>
+      <div class="chat-input" style="padding:12px 0 0;border:none">
+        <input id="text" placeholder="Ej: del 20 al 23 de diciembre para 2 adultos">
+        <button class="btn fit" id="send">Enviar</button>
+      </div>
+    </div>
+  </div></div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    let propertyId = params.get('propertyId');
+    const sessionId = localStorage.getItem('atria_chat_sid') || ('web-' + Math.random().toString(36).slice(2));
+    localStorage.setItem('atria_chat_sid', sessionId);
+    const body = document.getElementById('body');
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const add = (text, dir) => {
+      const el = document.createElement('div');
+      el.className = 'msg ' + dir;
+      el.textContent = text;
+      body.appendChild(el);
+      body.scrollTop = body.scrollHeight;
+    };
+    let lastTs = new Date().toISOString();
+
+    async function ensureProperty() {
+      if (propertyId) return propertyId;
+      // Demo: resolver la primera sede pública vía health/seed no expuesto; exigir query param
+      add('⚠️ Falta el parámetro propertyId en la URL (/chat.html?propertyId=...)', 'in');
+      throw new Error('propertyId requerido');
+    }
+
+    async function send() {
+      const input = document.getElementById('text');
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      add(text, 'out');
+      try {
+        await ensureProperty();
+        const res = await fetch(`/api/public/webchat/${propertyId}/messages`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId, text }),
+        });
+        const data = await res.json();
+        (data.replies || []).forEach(r => add(r, 'in'));
+        if (data.replies?.length === 0 && data.aiEnabled === false) {
+          poll(); // humano atendiendo: escuchar respuestas
+        }
+        lastTs = new Date().toISOString();
+      } catch {}
+    }
+
+    // Polling para respuestas humanas
+    async function poll() {
+      if (!propertyId) return;
+      const res = await fetch(`/api/public/webchat/${propertyId}/messages?sessionId=${sessionId}&after=${encodeURIComponent(lastTs)}`);
+      const data = await res.json();
+      (data.messages || []).filter(m => m.direction === 'out').forEach(m => add(m.body, 'in'));
+      if (data.messages?.length) lastTs = data.messages[data.messages.length - 1].createdAt;
+    }
+    setInterval(poll, 5000);
+
+    document.getElementById('send').onclick = send;
+    document.getElementById('text').onkeydown = e => e.key === 'Enter' && send();
+  </script>
+</body>
+</html>
