@@ -27,6 +27,38 @@
     setTimeout(() => el.remove(), 5000);
   }
 
+  const reducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Bienvenida elegante tras iniciar sesión (una sola vez).
+  function showWelcome() {
+    if (reducedMotion()) return;
+    const name = (state.user?.name || '').split(' ')[0] || '';
+    const el = document.createElement('div');
+    el.className = 'welcome-overlay';
+    el.innerHTML = `<div class="ring"></div><div class="wm">ATR<b>IA</b></div><div class="greet">Bienvenido${name ? ', ' + esc(name) : ''} 👋</div>`;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 2400);
+  }
+
+  // Conteo animado para los KPIs con [data-count].
+  function animateCounts(scope) {
+    (scope || document).querySelectorAll('[data-count]').forEach(el => {
+      const to = +el.dataset.count;
+      if (isNaN(to)) return;
+      const type = el.dataset.fmt || 'int';
+      const fmt = type === 'cop' ? cop : type === 'pct' ? (v => Math.round(v) + '%') : (v => Math.round(v).toLocaleString('es-CO'));
+      if (reducedMotion()) { el.textContent = fmt(to); return; }
+      const dur = 850, t0 = performance.now();
+      const step = now => {
+        const p = Math.min(1, (now - t0) / dur);
+        const e = 1 - Math.pow(1 - p, 3);
+        el.textContent = fmt(to * e);
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
   async function api(path, opts = {}) {
     const res = await fetch('/api' + path, {
       ...opts,
@@ -89,6 +121,7 @@
         localStorage.setItem('atria_user', JSON.stringify(data.user));
         localStorage.setItem('atria_props', JSON.stringify(data.properties));
         localStorage.setItem('atria_prop', state.propertyId || '');
+        state.justLoggedIn = true;
         render();
       } catch (err) { toast(err.message, true); }
     };
@@ -171,12 +204,13 @@
   // ---------- vistas ----------
   async function viewDashboard() {
     const d = await get(`/dashboard?${pid()}`);
+    setTimeout(animateCounts, 0);
     return `
       <div class="grid cols-4">
-        <div class="kpi"><div class="label">Ocupación</div><div class="value">${d.rooms.occupancyPct}%<small> ${d.rooms.occupied}/${d.rooms.total - d.rooms.outOfService}</small></div></div>
-        <div class="kpi"><div class="label">ADR (mes)</div><div class="value">${cop(d.kpis.adr)}</div></div>
-        <div class="kpi"><div class="label">RevPAR (mes)</div><div class="value">${cop(d.kpis.revpar)}</div></div>
-        <div class="kpi"><div class="label">Ingresos del mes</div><div class="value">${cop(d.kpis.monthRevenue)}</div></div>
+        <div class="kpi"><div class="label">Ocupación</div><div class="value"><span data-count="${d.rooms.occupancyPct}" data-fmt="pct">0%</span><small> ${d.rooms.occupied}/${d.rooms.total - d.rooms.outOfService}</small></div></div>
+        <div class="kpi"><div class="label">ADR (mes)</div><div class="value"><span data-count="${d.kpis.adr}" data-fmt="cop">$0</span></div></div>
+        <div class="kpi"><div class="label">RevPAR (mes)</div><div class="value"><span data-count="${d.kpis.revpar}" data-fmt="cop">$0</span></div></div>
+        <div class="kpi"><div class="label">Ingresos del mes</div><div class="value"><span data-count="${d.kpis.monthRevenue}" data-fmt="cop">$0</span></div></div>
       </div>
       <div class="grid cols-2 mt">
         <div class="card"><h3>Llegadas de hoy (${d.today.arrivals.length})</h3>
@@ -187,10 +221,10 @@
         </div>
       </div>
       <div class="grid cols-4 mt">
-        <div class="kpi"><div class="label">Huéspedes en casa</div><div class="value">${d.today.inHouse}</div></div>
-        <div class="kpi"><div class="label">Aprobaciones pendientes</div><div class="value" style="color:${d.alerts.pendingApprovals ? 'var(--yellow)' : 'inherit'}">${d.alerts.pendingApprovals}</div></div>
-        <div class="kpi"><div class="label">Limpiezas pendientes</div><div class="value">${d.alerts.housekeepingPending}</div></div>
-        <div class="kpi"><div class="label">Leads abiertos</div><div class="value">${d.alerts.openLeads}</div></div>
+        <div class="kpi"><div class="label">Huéspedes en casa</div><div class="value"><span data-count="${d.today.inHouse}">0</span></div></div>
+        <div class="kpi"><div class="label">Aprobaciones pendientes</div><div class="value" style="color:${d.alerts.pendingApprovals ? 'var(--yellow)' : 'inherit'}"><span data-count="${d.alerts.pendingApprovals}">0</span></div></div>
+        <div class="kpi"><div class="label">Limpiezas pendientes</div><div class="value"><span data-count="${d.alerts.housekeepingPending}">0</span></div></div>
+        <div class="kpi"><div class="label">Leads abiertos</div><div class="value"><span data-count="${d.alerts.openLeads}">0</span></div></div>
       </div>`;
   }
 
@@ -200,8 +234,17 @@
       try { await api(`/admin/rooms/${roomId}/status`, { method: 'PATCH', body: { status } }); toast('Estado actualizado'); render(); }
       catch (err) { toast(err.message, true); }
     };
-    return `<div class="room-grid">${rooms.map(r => `
-      <div class="room-tile ${r.status}">
+    const today = new Date().toISOString().slice(0, 10);
+    const attn = r => r.status === 'out_of_service' ? ' attention urgent'
+      : r.status === 'dirty' ? ' attention'
+      : (r.currentGuest && day(r.currentGuest.checkOut) === today) ? ' attention' : '';
+    const LEG = [['clean', 'Limpia'], ['inspected', 'Inspeccionada'], ['dirty', 'Sucia'], ['occupied', 'Ocupada'], ['out_of_service', 'Fuera de servicio']];
+    return `
+      <div class="legend">${LEG.map(([k, l]) => `<div class="legend-item"><span class="legend-dot ${k}"></span>${l}</div>`).join('')}
+        <div class="legend-item" style="margin-left:auto"><span class="legend-dot" style="background:var(--yellow);animation:pulse 1.9s infinite;box-shadow:0 0 0 0 rgba(230,196,107,.5)"></span>Requiere acción</div>
+      </div>
+      <div class="room-grid">${rooms.map(r => `
+      <div class="room-tile ${r.status}${attn(r)}">
         <div class="num">${esc(r.number)}</div>
         <div class="type">${esc(r.roomType)} · ${r.capacity} pax</div>
         ${sb(r.status)}
@@ -459,6 +502,9 @@
         const text = $('#chatText').value.trim();
         if (!text) return;
         $('#chatText').value = '';
+        // Burbuja optimista: aparece al instante para que se sienta ágil.
+        const cb = $('#chatBody');
+        if (cb) { const d = document.createElement('div'); d.className = 'msg out'; d.textContent = text; cb.appendChild(d); cb.scrollTop = cb.scrollHeight; }
         try { await api(`/inbox/conversations/${id}/messages`, { method: 'POST', body: { text } }); load(); }
         catch (err) { toast(err.message, true); }
       }
@@ -1191,6 +1237,7 @@
       [title, fn] = VIEWS[state.view] || VIEWS.dashboard;
     }
     renderShell('<p class="muted">Cargando…</p>', title);
+    if (state.justLoggedIn) { state.justLoggedIn = false; showWelcome(); }
     try {
       $('#content').innerHTML = await fn(arg);
     } catch (err) {

@@ -26,6 +26,7 @@
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
+    "playwright-core": "^1.61.1",
     "prisma": "^6.16.0"
   },
   "engines": {

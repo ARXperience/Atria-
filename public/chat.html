@@ -35,6 +35,15 @@
     };
     let lastTs = new Date().toISOString();
 
+    const showTyping = () => {
+      hideTyping();
+      const t = document.createElement('div');
+      t.className = 'typing'; t.id = 'typing';
+      t.innerHTML = '<span></span><span></span><span></span>';
+      body.appendChild(t); body.scrollTop = body.scrollHeight;
+    };
+    const hideTyping = () => { const t = document.getElementById('typing'); if (t) t.remove(); };
+
     async function ensureProperty() {
       if (propertyId) return propertyId;
       // Demo: resolver la primera sede pública vía health/seed no expuesto; exigir query param
@@ -50,17 +59,19 @@
       add(text, 'out');
       try {
         await ensureProperty();
+        showTyping();
         const res = await fetch(`/api/public/webchat/${propertyId}/messages`, {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ sessionId, text }),
         });
         const data = await res.json();
+        hideTyping();
         (data.replies || []).forEach(r => add(r, 'in'));
         if (data.replies?.length === 0 && data.aiEnabled === false) {
           poll(); // humano atendiendo: escuchar respuestas
         }
         lastTs = new Date().toISOString();
-      } catch {}
+      } catch { hideTyping(); }
     }
 
     // Polling para respuestas humanas
@@ -68,7 +79,9 @@
       if (!propertyId) return;
       const res = await fetch(`/api/public/webchat/${propertyId}/messages?sessionId=${sessionId}&after=${encodeURIComponent(lastTs)}`);
       const data = await res.json();
-      (data.messages || []).filter(m => m.direction === 'out').forEach(m => add(m.body, 'in'));
+      const out = (data.messages || []).filter(m => m.direction === 'out');
+      if (out.length) hideTyping();
+      out.forEach(m => add(m.body, 'in'));
       if (data.messages?.length) lastTs = data.messages[data.messages.length - 1].createdAt;
     }
     setInterval(poll, 5000);
