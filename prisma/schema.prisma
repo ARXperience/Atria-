@@ -341,6 +341,86 @@ model Payment {
   @@index([propertyId, createdAt])
 }
 
+// ===================== Centro documental (§43) =====================
+
+model Document {
+  id           String   @id @default(cuid())
+  companyId    String
+  propertyId   String?
+  entityType   String?  // Employee | Reservation | Guest | Supplier | Property | Invoice | Contract | Compliance | Other
+  entityId     String?
+  docType      String   // RUT | RNT | CC | PASSPORT | contract | certificate | policy | invoice | other
+  title        String
+  fileName     String
+  mimeType     String?
+  sizeBytes    Int?
+  storageKey   String   // ruta relativa en storage/uploads
+  version      Int      @default(1)
+  supersedesId String?
+  issueDate    DateTime?
+  expiryDate   DateTime?
+  status       String   @default("active") // active | superseded | expired | deleted
+  expiryNotifiedAt DateTime?
+  uploadedBy   String?
+  createdAt    DateTime @default(now())
+
+  @@index([companyId, entityType, entityId])
+  @@index([companyId, status, expiryDate])
+}
+
+// ===================== Plantillas y políticas (§7) =====================
+
+model MessageTemplate {
+  id         String   @id @default(cuid())
+  propertyId String
+  channel    String   // whatsapp | email | voucher | internal
+  name       String
+  subject    String?
+  body       String   // admite variables {{nombre}}, {{codigo}}, {{total}}...
+  lang       String   @default("es")
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([propertyId, name])
+}
+
+model HotelPolicy {
+  id         String   @id @default(cuid())
+  propertyId String
+  type       String   // cancellation | checkin | checkout | pets | children | noshow | late_checkout | early_checkin | deposit
+  title      String
+  conditions String?
+  penalty    String?
+  publicText String?  // texto para web / motor de reservas / WhatsApp
+  active     Boolean  @default(true)
+  validFrom  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([propertyId, type])
+}
+
+// ===================== Motor de reglas legales (§39) =====================
+
+model ComplianceRule {
+  id          String   @id @default(cuid())
+  companyId   String
+  propertyId  String?
+  key         String   // rnt_expiry | doc_expiry | tra_incomplete | sire_pending | contract_expiry
+  name        String
+  description String?
+  severity    String   @default("warning") // info | warning | critical
+  thresholdDays Int?   // días de anticipación para alertar vencimientos
+  audienceRole String  @default("MANAGER")
+  active      Boolean  @default(true)
+  lastRunAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([companyId, active])
+}
+
 // ===================== Atria Fiscal (facturación — Dataico) =====================
 
 model Invoice {

@@ -73,6 +73,10 @@ const executors = {
     if (payload.endDate) data.endDate = new Date(payload.endDate);
     return prisma.employee.update({ where: { id: payload.employeeId }, data });
   },
+  async document_delete(payload) {
+    const { softDeleteDocument } = await import('./documents.js');
+    return softDeleteDocument(payload.documentId);
+  },
 };
 
 export async function decideApproval(requestId, { approve, user, note = null }) {

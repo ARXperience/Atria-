@@ -23,7 +23,7 @@ npm start                # http://localhost:4000
 | contabilidad@atria.co | Contabilidad |
 | auditor@atria.co | Auditor (solo lectura) |
 
-**Pruebas end-to-end**: `npm test` (38 pruebas de los flujos críticos de la sección 48 del documento).
+**Pruebas end-to-end**: `npm test` (46 pruebas de los flujos críticos de la sección 48 del documento).
 
 ## 📱 Vincular WhatsApp (Baileys)
 
@@ -94,6 +94,13 @@ Módulo **Atria Fiscal** integrado con [Dataico](https://www.dataico.com) como p
 | **Gobierno** | Motor de aprobaciones por tipo/rol con ejecución al aprobar, notificaciones internas por rol, dashboard gerencial (ocupación, ADR, RevPAR, llegadas/salidas) |
 
 **Páginas públicas**: checkout de pago (`/pay/<token>`), portal del huésped (`/guest/<código>`), webchat (`/chat.html?propertyId=...`).
+
+## 📁 Centro documental, plantillas y reglas (Ola 1)
+
+- **Centro documental** (§43): carga de archivos (PDF/imagen hasta 15 MB), clasificación por tipo, asociación a empresa/sede/empleado/huésped/proveedor, **versionado** (una versión nueva supersede la anterior), descarga y **alertas automáticas de vencimiento**. Eliminar un documento legal (RUT, RNT, contrato, póliza, certificado) **requiere aprobación del dueño**.
+- **Plantillas de mensajes** (§7): WhatsApp/email/voucher con variables `{{nombre}}`, `{{codigo}}`, `{{total}}`.
+- **Políticas hoteleras** (§7): cancelación, check-in, mascotas, no-show, etc., con texto público.
+- **Motor de reglas de cumplimiento** (§39): reglas versionables y parametrizables (anticipación, severidad, destinatario) que se ejecutan **automáticamente cada 6 horas** revisando RNT, documentos, TRA, SIRE y contratos por vencer, y generan alertas. Botón "Ejecutar ahora" en el panel.
 
 ## 🗺️ Roadmap (fases siguientes del documento)
 

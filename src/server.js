@@ -17,17 +17,21 @@ import { opsRouter } from './routes/ops.js';
 import { complianceRouter } from './routes/compliance.js';
 import { hrRouter } from './routes/hr.js';
 import { invoicesRouter } from './routes/invoices.js';
+import { documentsRouter } from './routes/documents.js';
 import { miscRouter } from './routes/misc.js';
 import { publicRouter } from './routes/public.js';
 import { registerAutomations } from './services/automations.js';
 import { expireStaleTentatives } from './services/reservations.js';
 import { resumeSavedSessions } from './services/whatsapp.js';
+import { checkExpiringDocuments } from './services/documents.js';
+import { runAllComplianceRules } from './services/rulesEngine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.set('trust proxy', true);
-// rawBody se conserva para verificar firmas de webhooks (Stripe/Bold)
-app.use(express.json({ limit: '2mb', verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); } }));
+// rawBody se conserva para verificar firmas de webhooks (Stripe/Bold).
+// Límite alto para permitir carga de documentos en base64 (§43).
+app.use(express.json({ limit: '20mb', verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); } }));
 
 // Salud
 app.get('/api/health', async (_req, res) => {
@@ -54,6 +58,7 @@ app.use('/api/ops', authRequired, opsRouter);
 app.use('/api/compliance', authRequired, complianceRouter);
 app.use('/api/hr', authRequired, hrRouter);
 app.use('/api/invoices', authRequired, invoicesRouter);
+app.use('/api/documents', authRequired, documentsRouter);
 app.use('/api', authRequired, miscRouter);
 
 // Frontend estático: panel admin + página de pago + portal huésped
@@ -74,6 +79,14 @@ registerAutomations();
 setInterval(() => {
   expireStaleTentatives().catch(err => logger.error({ err }, 'expire job failed'));
 }, 60_000);
+// Cumplimiento diario (§48): vencimiento de documentos + motor de reglas.
+// Se ejecuta al arrancar y cada 6 horas (las alertas son idempotentes).
+async function complianceSweep() {
+  await checkExpiringDocuments().catch(err => logger.error({ err }, 'document expiry job failed'));
+  await runAllComplianceRules().catch(err => logger.error({ err }, 'compliance rules job failed'));
+}
+setInterval(complianceSweep, 6 * 3600_000);
+setTimeout(complianceSweep, 8000);
 
 const server = app.listen(config.port, () => {
   logger.info(`Atria Hospitality OS escuchando en http://localhost:${config.port}`);

@@ -117,6 +117,7 @@
     ['sep', 'Gobierno'],
     ['approvals', '✅ Aprobaciones'],
     ['compliance', '⚖️ Cumplimiento'],
+    ['documents', '📁 Documentos'],
     ['audit', '🔍 Auditoría'],
     ['settings', '⚙️ Configuración'],
   ];
@@ -809,6 +810,87 @@
       </div>`;
   }
 
+  async function viewDocuments() {
+    const [docs, rules] = await Promise.all([
+      get('/documents'),
+      get('/documents/rules/list').catch(() => []),
+    ]);
+    window._uploadDoc = () => {
+      const file = $('#docFile').files[0];
+      if (!file) return toast('Selecciona un archivo', true);
+      if (file.size > 15 * 1024 * 1024) return toast('El archivo supera 15 MB', true);
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          await api('/documents', {
+            method: 'POST',
+            body: {
+              propertyId: state.propertyId, docType: $('#docType').value, title: $('#docTitle').value || file.name,
+              fileName: file.name, mimeType: file.type, base64: reader.result,
+              entityType: $('#docEntity').value || null, expiryDate: $('#docExpiry').value || null,
+            },
+          });
+          toast('Documento cargado'); render();
+        } catch (err) { toast(err.message, true); }
+      };
+      reader.readAsDataURL(file);
+    };
+    window._delDoc = async (id, legal) => {
+      if (!confirm(legal ? 'Eliminar un documento legal requiere aprobación del dueño. ¿Continuar?' : '¿Eliminar este documento?')) return;
+      try {
+        const { status } = await api(`/documents/${id}`, { method: 'DELETE' });
+        toast(status === 202 ? 'Solicitud de eliminación enviada a aprobación' : 'Documento eliminado');
+        render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._runRules = async () => {
+      try { const { data } = await api('/documents/rules/run', { method: 'POST' }); toast(`Reglas ejecutadas: ${data.findings} alerta(s) generada(s)`); }
+      catch (err) { toast(err.message, true); }
+    };
+    const LEGAL = ['RUT', 'RNT', 'contract', 'policy', 'certificate'];
+    const expiryBadge = d => {
+      if (!d.expiryDate) return '';
+      const days = Math.ceil((new Date(d.expiryDate) - Date.now()) / 86400000);
+      if (days < 0) return badge('vencido', 'red');
+      if (days < 45) return badge(`vence en ${days}d`, 'yellow');
+      return `<span class="muted" style="font-size:11px">${day(d.expiryDate)}</span>`;
+    };
+    return `
+      <div class="card"><h3>Cargar documento</h3>
+        <div class="row">
+          <div><label>Título</label><input id="docTitle" placeholder="RUT actualizado"></div>
+          <div><label>Tipo</label><select id="docType">
+            <option value="RUT">RUT</option><option value="RNT">RNT</option><option value="CC">Cédula</option>
+            <option value="PASSPORT">Pasaporte</option><option value="contract">Contrato</option>
+            <option value="certificate">Certificado</option><option value="policy">Política</option>
+            <option value="invoice">Factura</option><option value="other" selected>Otro</option></select></div>
+          <div><label>Asociar a</label><select id="docEntity">
+            <option value="">(ninguno)</option><option value="Property">Sede</option><option value="Employee">Empleado</option>
+            <option value="Guest">Huésped</option><option value="Supplier">Proveedor</option></select></div>
+          <div><label>Vence</label><input id="docExpiry" type="date"></div>
+        </div>
+        <div class="row mt">
+          <div><label>Archivo (PDF/imagen, máx 15 MB)</label><input id="docFile" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"></div>
+          <button class="btn fit" onclick="_uploadDoc()">Cargar</button>
+        </div>
+      </div>
+      <div class="card"><table>
+        <tr><th>Título</th><th>Tipo</th><th>Ver.</th><th>Vencimiento</th><th>Cargado</th><th></th></tr>
+        ${docs.map(d => `<tr>
+          <td>${esc(d.title)}<div class="muted" style="font-size:11px">${esc(d.fileName)}</div></td>
+          <td>${LEGAL.includes(d.docType) ? badge(d.docType, 'blue') : esc(d.docType)}</td>
+          <td>v${d.version}</td><td>${expiryBadge(d)}</td><td class="muted" style="font-size:12px">${dt(d.createdAt)}</td>
+          <td><a class="btn small secondary" href="/api/documents/${d.id}/download" target="_blank" style="text-decoration:none">Ver</a>
+              <button class="btn small danger" onclick="_delDoc('${d.id}',${LEGAL.includes(d.docType)})">Eliminar</button></td>
+        </tr>`).join('')}
+      </table>${docs.length ? '' : '<p class="muted">Sin documentos. Carga RUT, RNT, contratos, certificados y pólizas para controlar vencimientos.</p>'}</div>
+      <div class="card"><h3>Motor de reglas de cumplimiento <button class="btn small secondary" style="float:right" onclick="_runRules()">Ejecutar ahora</button></h3>
+        <table><tr><th>Regla</th><th>Severidad</th><th>Anticipación</th><th>Avisar a</th><th>Estado</th></tr>
+        ${rules.map(r => `<tr><td>${esc(r.name)}</td><td>${sb(r.severity === 'critical' ? 'open' : r.severity === 'warning' ? 'pending' : 'active')} ${esc(r.severity)}</td><td>${r.thresholdDays ? r.thresholdDays + ' días' : '—'}</td><td>${esc(r.audienceRole)}</td><td>${r.active ? badge('activa', 'green') : badge('inactiva', 'gray')}</td></tr>`).join('')}
+        </table><p class="muted mt" style="font-size:12px">Se ejecutan automáticamente cada 6 horas. Revisan RNT, documentos, TRA, SIRE y contratos por vencer.</p>
+      </div>`;
+  }
+
   async function viewAudit() {
     const logs = await get(`/audit-logs?${pid()}`);
     return `<div class="card"><table>
@@ -824,11 +906,13 @@
   }
 
   async function viewSettings() {
-    const [users, params, props, gateways] = await Promise.all([
+    const [users, params, props, gateways, templates, policies] = await Promise.all([
       get('/admin/users').catch(() => []),
       get('/admin/legal-parameters').catch(() => []),
       get('/admin/properties'),
       get('/payments/gateways').catch(() => []),
+      get(`/documents/templates/list?${pid()}`).catch(() => []),
+      get(`/documents/policies/list?${pid()}`).catch(() => []),
     ]);
     const prop = props.find(p => p.id === state.propertyId) || props[0];
     window._addUser = async () => {
@@ -841,6 +925,18 @@
       try {
         await api('/admin/legal-parameters', { method: 'POST', body: { key: $('#lpKey').value, value: +$('#lpValue').value, unit: $('#lpUnit').value, validFrom: $('#lpFrom').value, source: $('#lpSource').value } });
         toast('Parámetro registrado'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._addTemplate = async () => {
+      try {
+        await api('/documents/templates', { method: 'POST', body: { propertyId: state.propertyId, channel: $('#tplChannel').value, name: $('#tplName').value, subject: $('#tplSubject').value, body: $('#tplBody').value } });
+        toast('Plantilla guardada'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._addPolicy = async () => {
+      try {
+        await api('/documents/policies', { method: 'POST', body: { propertyId: state.propertyId, type: $('#polType').value, title: $('#polTitle').value, conditions: $('#polCond').value, penalty: $('#polPen').value, publicText: $('#polPublic').value } });
+        toast('Política creada'); render();
       } catch (err) { toast(err.message, true); }
     };
     const roles = ['MANAGER', 'FRONTDESK', 'SALES', 'HOUSEKEEPING', 'MAINTENANCE', 'ACCOUNTING', 'HR', 'AUDITOR', 'OWNER'];
@@ -874,6 +970,31 @@
           <div><label>Fuente</label><input id="lpSource"></div>
           <button class="btn fit" onclick="_addParam()">Registrar</button>
         </div>
+      </div>
+      <div class="card"><h3>Plantillas de mensajes</h3>
+        <table><tr><th>Nombre</th><th>Canal</th><th>Contenido</th></tr>
+        ${templates.map(t => `<tr><td>${esc(t.name)}</td><td>${badge(t.channel, 'blue')}</td><td class="muted" style="font-size:12px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.body)}</td></tr>`).join('')}</table>
+        <div class="row mt">
+          <div><label>Nombre</label><input id="tplName" placeholder="voucher_confirmacion"></div>
+          <div><label>Canal</label><select id="tplChannel"><option>whatsapp</option><option>email</option><option>voucher</option><option>internal</option></select></div>
+          <div><label>Asunto (email)</label><input id="tplSubject"></div>
+        </div>
+        <label>Cuerpo (usa variables {{nombre}}, {{codigo}}, {{total}})</label><textarea id="tplBody" rows="2"></textarea>
+        <button class="btn small mt" onclick="_addTemplate()">Guardar plantilla</button>
+      </div>
+      <div class="card"><h3>Políticas hoteleras</h3>
+        <table><tr><th>Tipo</th><th>Título</th><th>Penalidad</th><th>Texto público</th></tr>
+        ${policies.map(p => `<tr><td>${esc(p.type)}</td><td>${esc(p.title)}</td><td class="muted">${esc(p.penalty || '—')}</td><td class="muted" style="font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.publicText || '')}</td></tr>`).join('')}</table>
+        <div class="row mt">
+          <div><label>Tipo</label><select id="polType"><option value="cancellation">Cancelación</option><option value="checkin">Check-in</option><option value="checkout">Check-out</option><option value="pets">Mascotas</option><option value="children">Niños</option><option value="noshow">No-show</option><option value="late_checkout">Late check-out</option><option value="deposit">Anticipo</option></select></div>
+          <div><label>Título</label><input id="polTitle"></div>
+          <div><label>Penalidad</label><input id="polPen" placeholder="1 noche"></div>
+        </div>
+        <div class="row mt">
+          <div><label>Condiciones</label><input id="polCond"></div>
+          <div><label>Texto público</label><input id="polPublic"></div>
+          <button class="btn fit" onclick="_addPolicy()">Crear política</button>
+        </div>
       </div>`;
   }
 
@@ -893,6 +1014,7 @@
     payroll: ['Nómina colombiana', viewPayroll],
     approvals: ['Aprobaciones humanas', viewApprovals],
     compliance: ['Cumplimiento (RNT · TRA · SIRE)', viewCompliance],
+    documents: ['Centro documental', viewDocuments],
     audit: ['Auditoría y trazabilidad', viewAudit],
     settings: ['Configuración', viewSettings],
   };

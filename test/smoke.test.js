@@ -395,6 +395,88 @@ async function main() {
       assert.ok(data.pendingApproval.requiredRole === 'OWNER');
     });
 
+    // ===== Ola 1: Centro documental, plantillas, políticas y reglas =====
+    let docId, legalDocId;
+    const tinyPdf = Buffer.from('%PDF-1.4 test atria').toString('base64');
+
+    await test('cargar documento con vencimiento', async () => {
+      const { status, data } = await api('/api/documents', {
+        method: 'POST',
+        body: {
+          propertyId, docType: 'certificate', title: 'Certificado manipulación alimentos',
+          fileName: 'cert.pdf', mimeType: 'application/pdf', base64: `data:application/pdf;base64,${tinyPdf}`,
+          expiryDate: futureDay(20),
+        },
+      });
+      assert.equal(status, 201);
+      docId = data.id;
+      assert.equal(data.version, 1);
+    });
+
+    await test('descargar documento devuelve el archivo', async () => {
+      const res = await fetch(`${BASE}/api/documents/${docId}/download`, { headers: { authorization: `Bearer ${token}` } });
+      assert.equal(res.status, 200);
+      const buf = Buffer.from(await res.arrayBuffer());
+      assert.ok(buf.toString().includes('PDF'), 'debe devolver el contenido del PDF');
+    });
+
+    await test('versionar documento supersede la versión anterior', async () => {
+      const { status, data } = await api('/api/documents', {
+        method: 'POST',
+        body: {
+          propertyId, docType: 'certificate', title: 'Certificado manipulación alimentos (v2)',
+          fileName: 'cert2.pdf', mimeType: 'application/pdf', base64: tinyPdf, supersedesId: docId,
+          expiryDate: futureDay(25),
+        },
+      });
+      assert.equal(status, 201);
+      assert.equal(data.version, 2);
+      const list = await api('/api/documents');
+      assert.ok(!list.data.some(d => d.id === docId), 'la versión anterior queda superseded (fuera del listado activo)');
+    });
+
+    await test('documento por vencer aparece en filtro expiring', async () => {
+      const { data } = await api('/api/documents?expiring=true');
+      assert.ok(data.some(d => d.title.includes('manipulación')), 'debe listar el certificado próximo a vencer');
+    });
+
+    await test('cargar documento legal y borrarlo requiere aprobación', async () => {
+      const up = await api('/api/documents', {
+        method: 'POST',
+        body: { propertyId, docType: 'RUT', title: 'RUT empresa', fileName: 'rut.pdf', mimeType: 'application/pdf', base64: tinyPdf },
+      });
+      legalDocId = up.data.id;
+      const del = await api(`/api/documents/${legalDocId}`, { method: 'DELETE' });
+      assert.equal(del.status, 202, 'borrar un documento legal debe pedir aprobación');
+      assert.equal(del.data.pendingApproval.requiredRole, 'OWNER');
+    });
+
+    await test('crear plantilla de mensaje', async () => {
+      const { status } = await api('/api/documents/templates', {
+        method: 'POST',
+        body: { propertyId, channel: 'whatsapp', name: 'voucher_confirmacion', body: 'Hola {{nombre}}, tu reserva {{codigo}} está confirmada.' },
+      });
+      assert.equal(status, 201);
+      const list = await api(`/api/documents/templates/list?propertyId=${propertyId}`);
+      assert.ok(list.data.some(t => t.name === 'voucher_confirmacion'));
+    });
+
+    await test('crear política hotelera', async () => {
+      const { status } = await api('/api/documents/policies', {
+        method: 'POST',
+        body: { propertyId, type: 'cancellation', title: 'Cancelación flexible', penalty: '1 noche', publicText: 'Cancela gratis hasta 48h antes.' },
+      });
+      assert.equal(status, 201);
+    });
+
+    await test('motor de reglas de cumplimiento se ejecuta y detecta pendientes', async () => {
+      const { status, data } = await api('/api/documents/rules/run', { method: 'POST' });
+      assert.equal(status, 200);
+      assert.ok(typeof data.findings === 'number', 'debe devolver número de hallazgos');
+      const rules = await api('/api/documents/rules/list');
+      assert.ok(rules.data.some(r => r.key === 'rnt_expiry'), 'deben existir las reglas por defecto');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {
