@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reserva directa</title>
+  <style>
+    :root{--bg:#0c1016;--surface:#161d27;--surface2:#1c2530;--border:#28313e;--text:#eef1f6;--muted:#8b96a5;--accent:#d8b064;--accent-hi:#e7c583;--green:#57cb92;--r:14px}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.55}
+    .hero{position:relative;min-height:62vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:60px 24px;background:radial-gradient(1000px 500px at 50% -10%,rgba(216,176,100,.14),transparent 60%),linear-gradient(180deg,#10151d,#0c1016)}
+    .hero.has-img::before{content:"";position:absolute;inset:0;background:var(--heroimg) center/cover;opacity:.28}
+    .hero>*{position:relative;z-index:1}
+    .wm{font-size:22px;font-weight:300;letter-spacing:6px;margin-bottom:8px}.wm b{color:var(--accent);font-weight:600}
+    h1{font-size:clamp(30px,6vw,58px);font-weight:650;letter-spacing:-1px;max-width:16ch;text-wrap:balance}
+    .sub{color:var(--muted);font-size:clamp(15px,2.5vw,20px);margin-top:14px;max-width:52ch}
+    .promo{display:inline-block;margin-top:20px;padding:8px 18px;border:1px solid var(--accent);border-radius:999px;color:var(--accent-hi);font-size:14px}
+    .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+    .booker{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:18px;margin:-40px auto 40px;max-width:900px;position:relative;z-index:2;box-shadow:0 20px 50px rgba(0,0,0,.45);display:flex;gap:12px;flex-wrap:wrap;align-items:end}
+    .booker .f{flex:1;min-width:120px}
+    label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
+    input,select{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:11px 12px;font-size:14px;font-family:inherit}
+    input:focus,select:focus{outline:none;border-color:var(--accent)}
+    .btn{background:linear-gradient(135deg,#e2bd76,#c99a4c);color:#191308;border:none;border-radius:9px;padding:12px 22px;font-weight:650;font-size:14px;cursor:pointer}
+    .btn:hover{filter:brightness(1.06)}.btn.ghost{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+    h2{font-size:26px;font-weight:600;margin:36px 0 4px;letter-spacing:-.4px}
+    .muted{color:var(--muted)}
+    .rooms{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px;margin:22px 0 40px}
+    .room{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;transition:transform .2s,box-shadow .2s}
+    .room:hover{transform:translateY(-4px);box-shadow:0 16px 40px rgba(0,0,0,.4)}
+    .room .ph{height:180px;background:var(--surface2) var(--img) center/cover;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
+    .room .body{padding:16px}
+    .room h3{font-size:18px;margin-bottom:4px}
+    .room .price{color:var(--accent-hi);font-weight:650;font-size:18px;margin-top:10px}
+    .room .price small{color:var(--muted);font-weight:400;font-size:12px}
+    .avail{display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:10px}
+    .faqs{margin:10px 0 50px}
+    .faq{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:10px}
+    .faq b{color:var(--accent-hi)}
+    footer{border-top:1px solid var(--border);padding:24px;text-align:center;color:var(--muted);font-size:13px}
+    .modal-bg{position:fixed;inset:0;background:rgba(6,9,13,.72);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+    .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:26px;width:460px;max-width:100%}
+    .modal h3{font-size:20px;margin-bottom:6px}
+    .ok{color:var(--green)}
+    @media(max-width:560px){.booker{flex-direction:column}.booker .f{width:100%}}
+  </style>
+</head>
+<body>
+  <div id="app"><div class="hero"><div class="wm">ATR<b>IA</b></div><p class="muted">Cargando…</p></div></div>
+  <script>
+    const pid = new URLSearchParams(location.search).get('propertyId') || location.pathname.split('/').pop();
+    const app = document.getElementById('app');
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const cop = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n||0);
+    const today = new Date().toISOString().slice(0,10);
+    const tomorrow = new Date(Date.now()+86400000).toISOString().slice(0,10);
+    let DATA = null;
+
+    async function load(){
+      const res = await fetch(`/api/public/hotel/${pid}/site`);
+      if(!res.ok){ app.innerHTML='<div class="hero"><div class="wm">ATR<b>IA</b></div><p class="muted">Hotel no disponible.</p></div>'; return; }
+      DATA = await res.json();
+      render();
+    }
+
+    function render(){
+      const {hotel,site,rooms,faqs}=DATA;
+      const heroStyle = site.heroImage ? `class="hero has-img" style="--heroimg:url('${site.heroImage}')"` : 'class="hero"';
+      app.innerHTML = `
+        <div ${heroStyle}>
+          <div class="wm">ATR<b>IA</b></div>
+          <h1>${esc(site.heroTitle || hotel.name)}</h1>
+          <p class="sub">${esc(site.heroSubtitle || `Reserva directa en ${hotel.city||'nuestro hotel'} — sin comisiones de intermediarios.`)}</p>
+          ${site.promoText?`<span class="promo">✦ ${esc(site.promoText)}</span>`:''}
+        </div>
+        <div class="wrap">
+          <div class="booker">
+            <div class="f"><label>Llegada</label><input type="date" id="ci" value="${today}" min="${today}"></div>
+            <div class="f"><label>Salida</label><input type="date" id="co" value="${tomorrow}" min="${tomorrow}"></div>
+            <div class="f"><label>Adultos</label><input type="number" id="ad" value="2" min="1"></div>
+            <div class="f"><label>Niños</label><input type="number" id="ch" value="0" min="0"></div>
+            <button class="btn" onclick="search()">Ver disponibilidad</button>
+          </div>
+          <div id="results"></div>
+          <h2>Nuestras habitaciones</h2>
+          <p class="muted">${hotel.checkInTime?`Check-in ${hotel.checkInTime} · Check-out ${hotel.checkOutTime}`:''}</p>
+          <div class="rooms">${rooms.map(roomCard).join('')}</div>
+          ${faqs.length?`<h2>Preguntas frecuentes</h2><div class="faqs">${faqs.map(f=>`<div class="faq"><b>${esc(f.title)}</b><div class="muted">${esc(f.content)}</div></div>`).join('')}</div>`:''}
+        </div>
+        <footer>${esc(hotel.name)}${hotel.address?` · ${esc(hotel.address)}`:''}${hotel.rnt?` · RNT ${esc(hotel.rnt)}`:''}<br>Reserva directa segura con Atria Hospitality OS</footer>`;
+    }
+
+    function roomCard(r){
+      const img = r.images && r.images[0] ? `style="--img:url('${r.images[0].url}')"` : '';
+      return `<div class="room"><div class="ph" ${img}>${r.images&&r.images[0]?'':'Sin foto'}</div>
+        <div class="body"><h3>${esc(r.name)}</h3>
+        <div class="muted" style="font-size:13px;min-height:38px">${esc(r.longDescription||r.description||'')}</div>
+        <div class="price">${cop(r.fromPrice)} <small>/ noche · hasta ${r.capacity} personas</small></div></div></div>`;
+    }
+
+    window.search = async () => {
+      const ci=document.getElementById('ci').value, co=document.getElementById('co').value;
+      const ad=+document.getElementById('ad').value, ch=+document.getElementById('ch').value;
+      const box=document.getElementById('results');
+      box.innerHTML='<p class="muted">Buscando disponibilidad…</p>';
+      const res=await fetch(`/api/public/hotel/${pid}/availability`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({checkIn:ci,checkOut:co,adults:ad,children:ch})});
+      const opts=await res.json();
+      if(!res.ok){ box.innerHTML=`<p class="muted">${esc(opts.error||'Error')}</p>`; return; }
+      if(!opts.length){ box.innerHTML=`<h2>Disponibilidad</h2><p class="muted">No hay habitaciones para esas fechas. Prueba otras.</p>`; return; }
+      window._opts={ci,co,ad,ch,list:opts};
+      box.innerHTML=`<h2>Disponibilidad ${ci} → ${co}</h2><div class="rooms">${opts.map((o,i)=>`
+        <div class="room"><div class="ph" ${o.images&&o.images[0]?`style="--img:url('${o.images[0].url}')"`:''}>${o.images&&o.images[0]?'':'Sin foto'}</div>
+        <div class="body"><h3>${esc(o.roomType)}</h3><div class="muted" style="font-size:13px">${o.available} disponible(s) · hasta ${o.capacity} personas</div>
+        <div class="avail"><div class="price">${cop(o.price)} <small>/noche</small></div><button class="btn" onclick="book(${i})">Reservar</button></div></div></div>`).join('')}</div>`;
+      box.scrollIntoView({behavior:'smooth'});
+    };
+
+    window.book = (i) => {
+      const o=window._opts.list[i], {ci,co,ad,ch}=window._opts;
+      const bg=document.createElement('div'); bg.className='modal-bg';
+      bg.innerHTML=`<div class="modal"><h3>Reservar ${esc(o.roomType)}</h3>
+        <p class="muted" style="font-size:13px;margin-bottom:14px">${ci} → ${co} · ${ad} adulto(s) · ${cop(o.price)}/noche</p>
+        <label>Nombre completo</label><input id="gn" placeholder="Tu nombre">
+        <label style="margin-top:10px">Teléfono (WhatsApp)</label><input id="gp" placeholder="3001234567">
+        <label style="margin-top:10px">Email</label><input id="ge" type="email" placeholder="tu@correo.com">
+        <div style="display:flex;gap:10px;margin-top:18px"><button class="btn" style="flex:1" id="conf">Confirmar y pagar</button><button class="btn ghost" onclick="this.closest('.modal-bg').remove()">Cancelar</button></div>
+        <div id="bkmsg" class="muted" style="font-size:12.5px;margin-top:12px"></div></div>`;
+      document.body.appendChild(bg);
+      bg.querySelector('#conf').onclick=async()=>{
+        const fullName=bg.querySelector('#gn').value.trim();
+        if(!fullName){ bg.querySelector('#bkmsg').textContent='Ingresa tu nombre.'; return; }
+        bg.querySelector('#conf').disabled=true; bg.querySelector('#bkmsg').textContent='Creando tu reserva…';
+        const res=await fetch(`/api/public/hotel/${pid}/book`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({checkIn:ci,checkOut:co,adults:ad,children:ch,roomTypeId:o.roomTypeId,ratePlanId:o.ratePlanId,guest:{fullName,phone:bg.querySelector('#gp').value,email:bg.querySelector('#ge').value}})});
+        const data=await res.json();
+        if(res.ok){ bg.querySelector('.modal').innerHTML=`<h3 class="ok">¡Reserva creada! 🎉</h3><p class="muted" style="margin:10px 0 16px">Código <b>${esc(data.code)}</b>. Paga el anticipo de <b>${cop(data.deposit)}</b> para confirmar.</p><a class="btn" style="display:block;text-align:center;text-decoration:none" href="${data.paymentUrl}">Pagar ${cop(data.deposit)}</a>`; }
+        else { bg.querySelector('#conf').disabled=false; bg.querySelector('#bkmsg').textContent=data.error||'No se pudo crear la reserva.'; }
+      };
+    };
+    load();
+  </script>
+</body>
+</html>

@@ -520,6 +520,19 @@ model PurchaseOrder {
   @@index([propertyId, status])
 }
 
+// ===================== Web / CMS público (§9) =====================
+model SiteSettings {
+  id           String   @id @default(cuid())
+  propertyId   String   @unique
+  heroTitle    String?
+  heroSubtitle String?
+  aboutText    String?
+  promoText    String?
+  heroImageId  String?  // documento imagen (docType=image)
+  published    Boolean  @default(true)
+  updatedAt    DateTime @updatedAt
+}
+
 // ===================== Atria Service — Restaurante/POS (§32) =====================
 
 model MenuItem {

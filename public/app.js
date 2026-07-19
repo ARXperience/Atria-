@@ -168,6 +168,7 @@
     ['sep', 'IA & Contenido'],
     ['copilot', '🧭 Copiloto'],
     ['content', '🖼️ Habitaciones & Conocimiento'],
+    ['site', '🌐 Sitio web'],
     ['agent', '🤖 Agente IA'],
     ['sep', 'Personas'],
     ['employees', '👔 Empleados'],
@@ -847,6 +848,33 @@
           <td>${k.active ? `<button class="btn small danger" onclick="_delKnow('${k.id}')">Quitar</button>` : ''}</td>
         </tr>`).join('')}</table>
         ${knowledge.length ? '' : '<p class="muted mt">Sin conocimiento aún. Agrega FAQs, servicios y datos del hotel para que el agente responda con precisión.</p>'}
+      </div>`;
+  }
+
+  async function viewSite() {
+    const site = await get(`/content/site?${pid()}`);
+    const siteUrl = `${location.origin}/sitio/${state.propertyId}`;
+    window._saveSite = async () => {
+      try {
+        await api('/content/site', { method: 'PUT', body: { propertyId: state.propertyId, heroTitle: $('#stTitle').value, heroSubtitle: $('#stSub').value, promoText: $('#stPromo').value, aboutText: $('#stAbout').value, published: $('#stPub').checked } });
+        toast('Sitio actualizado'); render();
+      } catch (e) { toast(e.message, true); }
+    };
+    return `
+      <div class="card"><h3>Sitio web público con reserva directa</h3>
+        <p class="muted" style="font-size:12.5px;margin-bottom:12px">Tu página muestra las habitaciones e imágenes que cargaste en "Habitaciones & Conocimiento", con motor de reservas y pago. Compártela sin comisiones de OTAs.</p>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <span class="badge ${site.published !== false ? 'green' : 'gray'}">${site.published !== false ? 'Publicado' : 'Oculto'}</span>
+          <a href="${siteUrl}" target="_blank" style="color:var(--accent2)">${siteUrl}</a>
+          <button class="btn small secondary" onclick="navigator.clipboard&&navigator.clipboard.writeText('${siteUrl}').then(()=>toast('Enlace copiado'))">Copiar enlace</button>
+        </div>
+        <label>Título principal (hero)</label><input id="stTitle" value="${esc(site.heroTitle || '')}" placeholder="Vive una experiencia inolvidable">
+        <label>Subtítulo</label><input id="stSub" value="${esc(site.heroSubtitle || '')}" placeholder="Reserva directa sin comisiones">
+        <label>Promoción (opcional)</label><input id="stPromo" value="${esc(site.promoText || '')}" placeholder="10% de descuento reservando directo">
+        <label>Acerca del hotel</label><textarea id="stAbout" rows="3">${esc(site.aboutText || '')}</textarea>
+        <label style="display:inline-flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="stPub" ${site.published !== false ? 'checked' : ''} style="width:auto"> Sitio publicado</label>
+        <div class="mt"><button class="btn" onclick="_saveSite()">Guardar</button>
+          <a href="${siteUrl}" target="_blank" class="btn secondary" style="text-decoration:none;margin-left:8px">Ver sitio</a></div>
       </div>`;
   }
 
@@ -1674,6 +1702,7 @@
     invoices: ['Facturación electrónica (Dataico)', viewInvoices],
     copilot: ['Copiloto interno', viewCopilot],
     content: ['Habitaciones y base de conocimiento', viewContent],
+    site: ['Sitio web público', viewSite],
     agent: ['Agente IA — persona y comportamiento', viewAgent],
     employees: ['Empleados (Atria People)', viewEmployees],
     shifts: ['Turnos y asistencia', viewShifts],

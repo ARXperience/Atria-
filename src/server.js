@@ -76,6 +76,7 @@ const publicDir = path.join(__dirname, '..', 'public');
 app.use(express.static(publicDir));
 app.get('/pay/:token', (_req, res) => res.sendFile(path.join(publicDir, 'pay.html')));
 app.get('/guest/:code', (_req, res) => res.sendFile(path.join(publicDir, 'guest.html')));
+app.get('/sitio/:propertyId', (_req, res) => res.sendFile(path.join(publicDir, 'hotel.html')));
 app.get('/', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 
 // Manejo de errores

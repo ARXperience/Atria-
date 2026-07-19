@@ -942,6 +942,48 @@ async function main() {
       assert.equal(charge.status, 400, 'la reserva original ya hizo check-out');
     });
 
+    // ===== Ola 4: Web pública con motor de reservas (§9) =====
+    await test('configurar y publicar el sitio web', async () => {
+      const { status } = await api('/api/content/site', { method: 'PUT', body: { propertyId, heroTitle: 'Bienvenido a Atria Bogotá', heroSubtitle: 'Reserva directa sin comisiones', promoText: '10% directo', published: true } });
+      assert.equal(status, 200);
+    });
+
+    await test('sitio público expone hotel, habitaciones y FAQs (sin auth)', async () => {
+      const res = await fetch(`${BASE}/api/public/hotel/${propertyId}/site`);
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.site.heroTitle, 'Bienvenido a Atria Bogotá');
+      assert.ok(data.rooms.length >= 3);
+      assert.ok(data.faqs.some(f => /parqueadero/i.test(f.title)), 'incluye las FAQs públicas');
+    });
+
+    await test('la página /sitio/:id se sirve', async () => {
+      const res = await fetch(`${BASE}/sitio/${propertyId}`);
+      assert.equal(res.status, 200);
+      assert.match(await res.text(), /ATR<b>IA<\/b>|propertyId/);
+    });
+
+    let webBook;
+    await test('disponibilidad y reserva directa pública → link de pago', async () => {
+      const ci = futureDay(60), co = futureDay(62);
+      const av = await fetch(`${BASE}/api/public/hotel/${propertyId}/availability`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkIn: ci, checkOut: co, adults: 2 }) });
+      const opts = await av.json();
+      assert.ok(opts.length >= 1 && opts[0].price > 0);
+      const bk = await fetch(`${BASE}/api/public/hotel/${propertyId}/book`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkIn: ci, checkOut: co, adults: 2, roomTypeId: opts[0].roomTypeId, ratePlanId: opts[0].ratePlanId, guest: { fullName: 'Reserva Web Directa', phone: '573009998877' } }) });
+      webBook = await bk.json();
+      assert.equal(bk.status, 201);
+      assert.match(webBook.code, /ATR-\d{4}/);
+      assert.match(webBook.paymentUrl, /\/pay\/|checkout|http/);
+    });
+
+    await test('pago de la reserva web la confirma', async () => {
+      const token = webBook.paymentUrl.split('/pay/')[1];
+      await api('/api/public/webhooks/payments/mock', { method: 'POST', body: { reference: token } });
+      await settle();
+      const list = await api(`/api/reservations?propertyId=${propertyId}&status=confirmed`);
+      assert.ok(list.data.some(r => r.code === webBook.code && r.channel === 'web'), 'la reserva web quedó confirmada');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

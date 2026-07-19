@@ -99,6 +99,23 @@ contentRouter.delete('/knowledge/:id', requirePermission('content.manage'), asyn
   res.json({ ok: true });
 });
 
+// ---- Sitio web público (§9) ----
+contentRouter.get('/site', requirePermission('content.view'), async (req, res) => {
+  const { propertyId } = req.query;
+  if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const site = await prisma.siteSettings.findUnique({ where: { propertyId } });
+  res.json(site || { propertyId, published: true });
+});
+
+contentRouter.put('/site', requirePermission('content.manage'), async (req, res) => {
+  const { propertyId, heroTitle, heroSubtitle, aboutText, promoText, heroImageId, published } = req.body || {};
+  if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const data = { heroTitle, heroSubtitle, aboutText, promoText, heroImageId, published: published !== false };
+  const site = await prisma.siteSettings.upsert({ where: { propertyId }, create: { propertyId, ...data }, update: data });
+  await audit({ propertyId, user: req.user, action: 'site.updated', entity: 'SiteSettings', entityId: site.id, after: { published: site.published } });
+  res.json(site);
+});
+
 // Vista previa del conocimiento que "ve" el agente (útil para el admin)
 contentRouter.get('/knowledge-snapshot', requirePermission('content.view'), async (req, res) => {
   const { propertyId, visibility } = req.query;

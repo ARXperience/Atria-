@@ -5,7 +5,7 @@ import { prisma } from '../db.js';
 import { handleGatewayWebhook } from '../services/payments.js';
 import { upsertConversation, saveInbound, sendOutbound } from '../services/inbox.js';
 import { assistantReply } from '../services/ai/assistant.js';
-import { fmtCOP, dayStr } from '../lib/util.js';
+import { fmtCOP, dayStr, parseDay } from '../lib/util.js';
 import { logger } from '../lib/logger.js';
 
 export const publicRouter = Router();
@@ -31,6 +31,64 @@ publicRouter.get('/hotel/:propertyId/rooms', async (req, res) => {
   if (!property) return res.status(404).json({ error: 'Sede no encontrada' });
   const { roomsContent } = await import('../services/knowledge.js');
   res.json({ hotel: { name: property.name, city: property.city }, rooms: await roomsContent(property.id) });
+});
+
+// ---- Sitio web público del hotel (§9): hero + habitaciones + FAQs ----
+publicRouter.get('/hotel/:propertyId/site', async (req, res) => {
+  const property = await prisma.property.findUnique({ where: { id: req.params.propertyId } });
+  if (!property) return res.status(404).json({ error: 'Sede no encontrada' });
+  const [{ roomsContent, listKnowledge }, site] = await Promise.all([
+    import('../services/knowledge.js'),
+    prisma.siteSettings.findUnique({ where: { propertyId: property.id } }),
+  ]);
+  if (site && !site.published) return res.status(404).json({ error: 'Sitio no publicado' });
+  const rooms = await roomsContent(property.id);
+  const faqs = await listKnowledge(property.id, { visibility: 'public' });
+  res.json({
+    hotel: { name: property.name, city: property.city, address: property.address, checkInTime: property.checkInTime, checkOutTime: property.checkOutTime, rnt: property.rnt, whatsapp: property.whatsappNumber },
+    site: site ? { heroTitle: site.heroTitle, heroSubtitle: site.heroSubtitle, aboutText: site.aboutText, promoText: site.promoText, heroImage: site.heroImageId ? `/api/public/media/${site.heroImageId}` : null } : {},
+    rooms, faqs: faqs.map(f => ({ title: f.title, content: f.content, category: f.category })),
+  });
+});
+
+// ---- Disponibilidad pública ----
+publicRouter.post('/hotel/:propertyId/availability', async (req, res) => {
+  const property = await prisma.property.findUnique({ where: { id: req.params.propertyId } });
+  if (!property) return res.status(404).json({ error: 'Sede no encontrada' });
+  const ci = parseDay(req.body?.checkIn), co = parseDay(req.body?.checkOut);
+  if (!ci || !co || co <= ci) return res.status(400).json({ error: 'Fechas inválidas' });
+  const { findAvailability } = await import('../services/availability.js');
+  const options = await findAvailability({ propertyId: property.id, checkIn: ci, checkOut: co, adults: +(req.body?.adults || 2), children: +(req.body?.children || 0) });
+  const { roomTypeImages } = await import('../services/knowledge.js');
+  const enriched = [];
+  for (const o of options) {
+    const plan = o.ratePlans[0] || null;
+    enriched.push({ roomTypeId: o.roomTypeId, roomType: o.roomType, capacity: o.capacity, description: o.description, available: o.availableRooms, price: plan?.price ?? o.baseRate, ratePlanId: plan?.ratePlanId || null, images: await roomTypeImages(o.roomTypeId) });
+  }
+  res.json(enriched);
+});
+
+// ---- Reserva directa pública (crea tentativa + link de pago) ----
+publicRouter.post('/hotel/:propertyId/book', async (req, res) => {
+  const property = await prisma.property.findUnique({ where: { id: req.params.propertyId } });
+  if (!property) return res.status(404).json({ error: 'Sede no encontrada' });
+  const { checkIn, checkOut, adults = 2, children = 0, roomTypeId, ratePlanId, guest } = req.body || {};
+  const ci = parseDay(checkIn), co = parseDay(checkOut);
+  if (!ci || !co || co <= ci) return res.status(400).json({ error: 'Fechas inválidas' });
+  if (!roomTypeId || !guest?.fullName) return res.status(400).json({ error: 'Habitación y nombre del huésped requeridos' });
+  try {
+    const { createTentativeReservation } = await import('../services/reservations.js');
+    const { createPaymentLink } = await import('../services/payments.js');
+    const reservation = await createTentativeReservation({
+      propertyId: property.id, guest: { fullName: guest.fullName, phone: guest.phone || null, email: guest.email || null },
+      roomTypeId, ratePlanId: ratePlanId || null, checkIn: ci, checkOut: co,
+      adults: +adults, children: +children, channel: 'web', createdBy: 'web',
+    });
+    const link = await createPaymentLink({ propertyId: property.id, reservationId: reservation.id, concept: `Anticipo reserva ${reservation.code}`, amount: reservation.depositRequired });
+    res.status(201).json({ code: reservation.code, total: reservation.total, deposit: reservation.depositRequired, paymentUrl: link.url });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // ---- Webhook de pasarelas (mock, wompi, mercadopago, bold, stripe) ----
