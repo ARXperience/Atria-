@@ -7,3 +7,15 @@ storage/wa-sessions/
 storage/uploads/
 logs/
 .DS_Store
+
+# Proyecto de video (Remotion) — dependencias y renders
+atria-video/node_modules/
+atria-video/out/
+atria-video/.remotion/
+
+# Symlinks de skills para Claude Code (frágiles en Windows); las skills reales viven en .agents/skills/
+.claude/skills/
+
+# Skills instaladas (herramientas locales del agente, no código del producto)
+.agents/
+skills-lock.json
