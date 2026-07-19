@@ -23,7 +23,7 @@ npm start                # http://localhost:4000
 | contabilidad@atria.co | Contabilidad |
 | auditor@atria.co | Auditor (solo lectura) |
 
-**Pruebas end-to-end**: `npm test` (58 pruebas de los flujos críticos de la sección 48 del documento).
+**Pruebas end-to-end**: `npm test` (62 pruebas de los flujos críticos de la sección 48 del documento).
 
 ## 📱 Vincular WhatsApp (Baileys)
 
@@ -108,6 +108,7 @@ El agente de WhatsApp/webchat ahora es **configurable por hotel** y responde con
 
 - **IA-1 · Contenido y conocimiento** (menú *Habitaciones & Conocimiento*): editor de cada habitación (descripción larga, camas, tamaño, vista, amenidades e **imágenes**) + **base de conocimiento** (FAQs, servicios, ubicación) con visibilidad pública/interna. Las imágenes se sirven por URL pública para web y agente.
 - **IA-2 · Persona por hotel** (menú *Agente IA*): nombre de la "mascota", tono, idiomas, saludo, uso de emojis, **guardrail de solo-dominio** (no habla de otros temas) y on/off de IA natural. Cada hotel tiene su propio agente.
+- **IA-4 · Copiloto interno**: asistente dentro del panel para el equipo (recepción, housekeeping, mantenimiento, contabilidad, RR.HH.), que responde en lenguaje natural sobre habitaciones, llegadas/salidas, aprobaciones, limpiezas, mantenimiento, caja y nómina — **solo con la información que el rol del usuario puede ver**.
 - **IA-3 · Control de funciones**: el agente ejecuta herramientas por conversación — consultar disponibilidad, cotizar, **crear reserva + link de pago**, dar datos de habitación/hotel y **notificar al equipo** — con permisos, aprobaciones y auditoría. Nunca ofrece reembolsos/descuentos: escala a una persona.
 
 **Cómo funciona la IA según tengas o no API key:**

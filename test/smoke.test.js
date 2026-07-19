@@ -594,6 +594,40 @@ async function main() {
       assert.match(sel.data.replies.join(' '), /[Tt]otal|anticipo/, 'debe cotizar tras elegir opción');
     });
 
+    // ===== IA-4: copiloto interno con acceso restringido por rol =====
+    await test('copiloto: estado de habitaciones (gerente)', async () => {
+      const { status, data } = await api('/api/assistant/internal', { method: 'POST', body: { propertyId, text: '¿Cómo están las habitaciones?' } });
+      assert.equal(status, 200);
+      assert.match(data.reply, /habitaciones|limpias|ocupadas/i);
+    });
+
+    await test('copiloto: llegadas y salidas de hoy', async () => {
+      const { data } = await api('/api/assistant/internal', { method: 'POST', body: { propertyId, text: 'llegadas de hoy' } });
+      assert.match(data.reply, /Llegadas|Salidas/i);
+    });
+
+    await test('copiloto: busca una reserva por código', async () => {
+      const { data } = await api('/api/assistant/internal', { method: 'POST', body: { propertyId, text: `dame la reserva ${reservation.code}` } });
+      assert.match(data.reply, new RegExp(reservation.code));
+    });
+
+    await test('copiloto: housekeeping ve limpiezas pero NO caja', async () => {
+      const { data: hk } = await api('/api/auth/login', { method: 'POST', body: { email: 'housekeeping@atria.co', password: 'atria2026' } });
+      const askAs = async (text) => {
+        const res = await fetch(`${BASE}/api/assistant/internal`, {
+          method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${hk.token}` },
+          body: JSON.stringify({ propertyId, text }),
+        });
+        return (await res.json()).reply;
+      };
+      const cleaning = await askAs('¿qué limpiezas hay pendientes?');
+      assert.match(cleaning, /limpieza|pendiente/i);
+      // Pregunta por caja: housekeeping NO tiene payments.view → no revela caja, cae a ayuda
+      const cash = await askAs('¿cuánto hay en caja hoy?');
+      assert.doesNotMatch(cash, /total de \$|caja del día se han registrado/i);
+      assert.match(cash, /copiloto|ayudarte|habitaciones/i);
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

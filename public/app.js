@@ -145,6 +145,7 @@
     ['payments', '💳 Pagos'],
     ['invoices', '🧾 Facturación'],
     ['sep', 'IA & Contenido'],
+    ['copilot', '🧭 Copiloto'],
     ['content', '🖼️ Habitaciones & Conocimiento'],
     ['agent', '🤖 Agente IA'],
     ['sep', 'Personas'],
@@ -665,6 +666,62 @@
         ${sire.map(s => `<tr><td>${esc(s.reservation.code)}</td><td>${esc(s.guestName)}</td><td>${esc(s.nationality)}</td><td>${sb(s.status)}</td>
         <td>${s.status === 'pending' ? `<button class="btn small secondary" onclick="_sireMark('${s.id}','prepared')">Marcar preparado</button>` : ''}
         ${s.status === 'prepared' ? `<button class="btn small secondary" onclick="_sireMark('${s.id}','reported')">Marcar reportado</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">Sin huéspedes extranjeros detectados.</p>'}</div>`;
+  }
+
+  function viewCopilot() {
+    const role = state.user.role;
+    const suggestions = {
+      HOUSEKEEPING: ['¿Qué limpiezas hay pendientes?', 'Estado de las habitaciones'],
+      MAINTENANCE: ['Órdenes de mantenimiento abiertas', 'Estado de las habitaciones'],
+      FRONTDESK: ['Llegadas y salidas de hoy', 'Estado de las habitaciones', 'Aprobaciones pendientes'],
+      ACCOUNTING: ['Caja del día', 'Aprobaciones pendientes'],
+      HR: ['Empleados y nómina', 'Estado de las habitaciones'],
+    }[role] || ['Estado de las habitaciones', 'Llegadas y salidas de hoy', 'Aprobaciones pendientes'];
+
+    setTimeout(() => {
+      const body = $('#copBody');
+      const append = (text, dir) => {
+        const el = document.createElement('div');
+        el.className = 'msg ' + dir;
+        el.textContent = text;
+        body.appendChild(el); body.scrollTop = body.scrollHeight;
+      };
+      const typing = on => {
+        let t = document.getElementById('copTyping');
+        if (on && !t) { t = document.createElement('div'); t.className = 'typing'; t.id = 'copTyping'; t.innerHTML = '<span></span><span></span><span></span>'; body.appendChild(t); body.scrollTop = body.scrollHeight; }
+        if (!on && t) t.remove();
+      };
+      const ask = async text => {
+        if (!text.trim()) return;
+        append(text, 'out'); typing(true);
+        try {
+          const { data } = await api('/assistant/internal', { method: 'POST', body: { propertyId: state.propertyId, text } });
+          typing(false); append(data.reply, 'in');
+        } catch (err) { typing(false); append('No pude procesar eso: ' + err.message, 'in'); }
+      };
+      window._copAsk = ask;
+      $('#copSend').onclick = () => { const v = $('#copText').value; $('#copText').value = ''; ask(v); };
+      $('#copText').onkeydown = e => { if (e.key === 'Enter') { const v = $('#copText').value; $('#copText').value = ''; ask(v); } };
+      document.querySelectorAll('.cop-chip').forEach(ch => { ch.onclick = () => ask(ch.textContent); });
+    }, 0);
+
+    return `
+      <div class="card" style="max-width:820px">
+        <h3>🧭 Copiloto interno — ${esc(state.user.name)} <span class="badge blue">${esc(role)}</span></h3>
+        <p class="muted" style="font-size:12.5px;margin-bottom:12px">Pregúntame en lenguaje natural. Solo veo la información que tu rol puede consultar.</p>
+        <div class="chat" style="height:460px;border-color:var(--border)">
+          <div class="chat-body" id="copBody">
+            <div class="msg in">¡Hola, ${esc(state.user.name.split(' ')[0])}! 👋 Soy tu copiloto. ¿En qué te ayudo?</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 12px 0">
+            ${suggestions.map(s => `<button class="btn small secondary cop-chip">${esc(s)}</button>`).join('')}
+          </div>
+          <div class="chat-input">
+            <input id="copText" placeholder="Escribe tu pregunta…" autocomplete="off">
+            <button class="btn fit" id="copSend">Enviar</button>
+          </div>
+        </div>
+      </div>`;
   }
 
   async function viewContent() {
@@ -1216,6 +1273,7 @@
     maintenance: ['Mantenimiento', viewMaintenance],
     payments: ['Pagos y links', viewPayments],
     invoices: ['Facturación electrónica (Dataico)', viewInvoices],
+    copilot: ['Copiloto interno', viewCopilot],
     content: ['Habitaciones y base de conocimiento', viewContent],
     agent: ['Agente IA — persona y comportamiento', viewAgent],
     employees: ['Empleados (Atria People)', viewEmployees],
