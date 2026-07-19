@@ -13,7 +13,7 @@ const PERMISSIONS = {
     'dashboard.view', 'reservations.*', 'booking.*', 'rooms.*', 'guests.*', 'crm.*', 'inbox.*',
     'payments.*', 'housekeeping.*', 'maintenance.*', 'compliance.*', 'approvals.*', 'audit.view',
     'settings.view', 'whatsapp.*', 'notifications.*', 'users.view', 'users.manage', 'settings.edit',
-    'hr.*', 'payroll.view', 'payroll.manage', 'invoices.*', 'documents.*', 'content.*', 'sgsst.*', 'inventory.*', 'pos.*', 'revenue.*', 'channels.*', 'finance.*',
+    'hr.*', 'payroll.view', 'payroll.manage', 'invoices.*', 'documents.*', 'content.*', 'sgsst.*', 'inventory.*', 'pos.*', 'revenue.*', 'channels.*', 'finance.*', 'dataprotection.*',
   ],
   FRONTDESK: [
     'dashboard.view', 'reservations.*', 'booking.*', 'rooms.view', 'rooms.status', 'guests.*',
@@ -21,6 +21,7 @@ const PERMISSIONS = {
     'housekeeping.create', 'maintenance.create', 'maintenance.view', 'compliance.tra', 'compliance.sire',
     'compliance.view', 'notifications.*', 'whatsapp.view', 'crm.view', 'crm.create',
     'invoices.view', 'invoices.create', 'documents.view', 'documents.manage', 'pos.*',
+    'dataprotection.view', 'dataprotection.consent',
   ],
   SALES: [
     'dashboard.view', 'crm.*', 'inbox.*', 'booking.*', 'reservations.view', 'reservations.create',
@@ -32,8 +33,8 @@ const PERMISSIONS = {
     'dashboard.view', 'payments.*', 'reservations.view', 'compliance.view', 'audit.view',
     'approvals.view', 'notifications.*', 'invoices.*', 'payroll.view', 'hr.view', 'documents.view', 'inventory.view', 'finance.*',
   ],
-  HR: ['dashboard.view', 'notifications.*', 'audit.view', 'hr.*', 'payroll.*', 'documents.*', 'approvals.view', 'approvals.decide', 'sgsst.*'],
-  AUDITOR: ['audit.view', 'dashboard.view', 'reservations.view', 'payments.view', 'compliance.view', 'approvals.view', 'invoices.view', 'payroll.view', 'hr.view', 'documents.view', 'sgsst.view', 'finance.view'],
+  HR: ['dashboard.view', 'notifications.*', 'audit.view', 'hr.*', 'payroll.*', 'documents.*', 'approvals.view', 'approvals.decide', 'sgsst.*', 'dataprotection.view', 'dataprotection.consent'],
+  AUDITOR: ['audit.view', 'dashboard.view', 'reservations.view', 'payments.view', 'compliance.view', 'approvals.view', 'invoices.view', 'payroll.view', 'hr.view', 'documents.view', 'sgsst.view', 'finance.view', 'dataprotection.view'],
 };
 
 export function hasPermission(role, perm) {

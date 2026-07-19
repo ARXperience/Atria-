@@ -1130,6 +1130,74 @@ async function main() {
       assert.equal(res.status, 403);
     });
 
+    // ===== Ola 6: Protección de datos / Habeas Data (§26) =====
+    let consentId;
+    await test('registrar consentimiento de tratamiento', async () => {
+      const c = await api('/api/dataprotection/consents', { method: 'POST', body: { propertyId, subjectName: 'María Gómez', documentNumber: '52123456', purpose: 'marketing', channel: 'recepcion' } });
+      assert.equal(c.status, 201);
+      consentId = c.data.id;
+      assert.equal(c.data.granted, true);
+    });
+
+    await test('finalidad de consentimiento inválida se rechaza', async () => {
+      const c = await api('/api/dataprotection/consents', { method: 'POST', body: { propertyId, subjectName: 'X', purpose: 'espionaje' } });
+      assert.equal(c.status, 400);
+    });
+
+    await test('overview de protección de datos cuenta consentimientos y bases RNBD', async () => {
+      const { status, data } = await api(`/api/dataprotection/overview?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(data.consentsActive >= 1);
+      assert.ok(data.treatments >= 3, 'las bases por defecto (RNBD) deben sembrarse');
+    });
+
+    await test('revocar consentimiento lo marca como revocado', async () => {
+      const r = await api(`/api/dataprotection/consents/${consentId}/revoke`, { method: 'POST' });
+      assert.equal(r.status, 200);
+      assert.equal(r.data.granted, false);
+      const ov = await api(`/api/dataprotection/overview?propertyId=${propertyId}`);
+      assert.ok(ov.data.consentsRevoked >= 1);
+    });
+
+    let requestId;
+    await test('crear solicitud del titular fija plazo legal', async () => {
+      const r = await api('/api/dataprotection/requests', { method: 'POST', body: { propertyId, subjectName: 'John Smith', documentNumber: 'X99887766', type: 'acceso', channel: 'correo' } });
+      assert.equal(r.status, 201);
+      requestId = r.data.id;
+      assert.ok(r.data.dueDate, 'debe calcular fecha límite (días hábiles)');
+      assert.equal(r.data.status, 'received');
+    });
+
+    await test('derecho de acceso exporta los datos del titular', async () => {
+      const { status, data } = await api(`/api/dataprotection/export?propertyId=${propertyId}&documentNumber=X99887766`);
+      assert.equal(status, 200);
+      assert.equal(data.found, true, 'debe encontrar al huésped extranjero creado antes');
+      assert.ok(Array.isArray(data.huesped) && data.huesped.length >= 1);
+    });
+
+    await test('resolver solicitud del titular', async () => {
+      const r = await api(`/api/dataprotection/requests/${requestId}/resolve`, { method: 'POST', body: { status: 'resolved', resolution: 'Se envió copia de la información.' } });
+      assert.equal(r.status, 200);
+      assert.equal(r.data.status, 'resolved');
+      assert.ok(r.data.resolvedAt);
+    });
+
+    await test('derecho de supresión anonimiza al titular', async () => {
+      const r = await api('/api/dataprotection/erase', { method: 'POST', body: { propertyId, documentNumber: 'X99887766' } });
+      assert.equal(r.status, 200);
+      assert.ok(r.data.anonymized >= 1);
+      const again = await api(`/api/dataprotection/export?propertyId=${propertyId}&documentNumber=X99887766`);
+      assert.equal(again.data.found, false, 'tras la supresión el documento ya no debe hallarse');
+    });
+
+    await test('recepción puede registrar consentimiento pero NO suprimir', async () => {
+      const { data: login } = await api('/api/auth/login', { method: 'POST', body: { email: 'recepcion@atria.co', password: 'atria2026' } });
+      const ok = await fetch(`${BASE}/api/dataprotection/consents`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${login.token}` }, body: JSON.stringify({ propertyId, subjectName: 'Huésped Recepción', purpose: 'tratamiento' }) });
+      assert.equal(ok.status, 201);
+      const denied = await fetch(`${BASE}/api/dataprotection/erase`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${login.token}` }, body: JSON.stringify({ propertyId, documentNumber: '52123456' }) });
+      assert.equal(denied.status, 403);
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

@@ -186,6 +186,7 @@
     ['sep', 'Gobierno'],
     ['approvals', '✅ Aprobaciones'],
     ['compliance', '⚖️ Cumplimiento'],
+    ['dataprotection', '🛡️ Protección de datos'],
     ['documents', '📁 Documentos'],
     ['audit', '🔍 Auditoría'],
     ['settings', '⚙️ Configuración'],
@@ -1126,6 +1127,95 @@
       </div>`;
   }
 
+  async function viewDataProtection() {
+    const [ov, consents, requests, treatments] = await Promise.all([
+      get(`/dataprotection/overview?${pid()}`),
+      get(`/dataprotection/consents?${pid()}`),
+      get(`/dataprotection/requests?${pid()}`),
+      get(`/dataprotection/treatments?${pid()}`),
+    ]);
+    const purposeLabel = { marketing: 'Marketing', tratamiento: 'Tratamiento', imagen: 'Imagen', datos_sensibles: 'Datos sensibles', transferencia: 'Transferencia' };
+    const typeLabel = { acceso: 'Acceso', rectificacion: 'Rectificación', supresion: 'Supresión', oposicion: 'Oposición', revocacion: 'Revocación' };
+    const stLabel = { received: 'Recibida', in_progress: 'En trámite', resolved: 'Resuelta', rejected: 'Rechazada' };
+    window._dpConsent = async () => {
+      try { await api('/dataprotection/consents', { method: 'POST', body: { propertyId: state.propertyId, subjectName: $('#dcName').value, documentNumber: $('#dcDoc').value || null, purpose: $('#dcPurpose').value, channel: $('#dcChannel').value, granted: true } }); toast('Consentimiento registrado'); render(); }
+      catch (e) { toast(e.message, true); }
+    };
+    window._dpRevoke = async id => { if (!confirm('¿Revocar este consentimiento?')) return; try { await api(`/dataprotection/consents/${id}/revoke`, { method: 'POST' }); toast('Consentimiento revocado'); render(); } catch (e) { toast(e.message, true); } };
+    window._dpReq = async () => {
+      try { await api('/dataprotection/requests', { method: 'POST', body: { propertyId: state.propertyId, subjectName: $('#drName').value, documentNumber: $('#drDoc').value || null, email: $('#drEmail').value || null, type: $('#drType').value, channel: $('#drChannel').value, detail: $('#drDetail').value || null } }); toast('Solicitud registrada'); render(); }
+      catch (e) { toast(e.message, true); }
+    };
+    window._dpResolve = async id => { const r = prompt('Respuesta / resolución al titular:'); if (r === null) return; try { await api(`/dataprotection/requests/${id}/resolve`, { method: 'POST', body: { status: 'resolved', resolution: r } }); toast('Solicitud resuelta'); render(); } catch (e) { toast(e.message, true); } };
+    window._dpExport = async () => {
+      const doc = prompt('Documento del titular para el derecho de acceso:'); if (!doc) return;
+      try {
+        const data = await api(`/dataprotection/export?${pid()}&documentNumber=${encodeURIComponent(doc)}`);
+        modal(`<h3>Derecho de acceso — ${esc(doc)}</h3>${data.found ? '' : '<p class="muted">Sin datos asociados a este documento.</p>'}<pre style="max-height:60vh;overflow:auto;white-space:pre-wrap;font-size:12px">${esc(JSON.stringify(data, null, 2))}</pre><div class="right"><button class="btn" onclick="this.closest('.modal-bg').remove()">Cerrar</button></div>`);
+      } catch (e) { toast(e.message, true); }
+    };
+    window._dpErase = async () => {
+      const doc = prompt('Documento del titular para SUPRIMIR (anonimizar). Esta acción es irreversible:'); if (!doc) return;
+      if (!confirm(`Se anonimizarán los datos del titular ${doc}. Los registros exigidos por ley (TRA, SIRE, facturas) se conservan. ¿Continuar?`)) return;
+      try { const r = await api('/dataprotection/erase', { method: 'POST', body: { propertyId: state.propertyId, documentNumber: doc } }); toast(`Titular anonimizado (${r.anonymized})`); render(); } catch (e) { toast(e.message, true); }
+    };
+    setTimeout(animateCounts, 0);
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Consentimientos activos</div><div class="value" style="color:var(--green)"><span data-count="${ov.consentsActive}">0</span></div></div>
+        <div class="kpi"><div class="label">Revocados</div><div class="value"><span data-count="${ov.consentsRevoked}">0</span></div></div>
+        <div class="kpi"><div class="label">Solicitudes abiertas</div><div class="value" style="color:${ov.requestsOpen ? 'var(--yellow)' : 'inherit'}"><span data-count="${ov.requestsOpen}">0</span></div></div>
+        <div class="kpi"><div class="label">Vencidas (fuera de plazo)</div><div class="value" style="color:${ov.requestsOverdue ? 'var(--red)' : 'inherit'}"><span data-count="${ov.requestsOverdue}">0</span></div></div>
+      </div>
+
+      <div class="card mt"><h3>Solicitudes del titular · derechos ARCO / habeas data</h3>
+        <div class="row">
+          <div><label>Titular</label><input id="drName"></div>
+          <div><label>Documento</label><input id="drDoc"></div>
+          <div><label>Correo</label><input id="drEmail"></div>
+          <div><label>Derecho</label><select id="drType"><option value="acceso">Acceso</option><option value="rectificacion">Rectificación</option><option value="supresion">Supresión</option><option value="oposicion">Oposición</option><option value="revocacion">Revocación</option></select></div>
+          <div><label>Canal</label><select id="drChannel"><option value="web">Web</option><option value="correo">Correo</option><option value="recepcion">Recepción</option><option value="whatsapp">WhatsApp</option><option value="telefono">Teléfono</option></select></div>
+          <button class="btn fit" onclick="_dpReq()">Registrar</button>
+        </div>
+        <div class="mt"><input id="drDetail" placeholder="Detalle de la solicitud (opcional)" style="width:100%"></div>
+        <div class="row mt">
+          <button class="btn ghost" onclick="_dpExport()">📤 Ejercer acceso (exportar datos)</button>
+          <button class="btn ghost danger" onclick="_dpErase()">🗑️ Ejercer supresión (anonimizar)</button>
+        </div>
+        <table class="mt"><tr><th>Titular</th><th>Documento</th><th>Derecho</th><th>Canal</th><th>Plazo</th><th>Estado</th><th></th></tr>
+        ${requests.map(r => {
+          const overdue = r.dueDate && ['received', 'in_progress'].includes(r.status) && new Date(r.dueDate) < new Date();
+          return `<tr><td>${esc(r.subjectName)}</td><td>${esc(r.documentNumber || '—')}</td><td>${typeLabel[r.type] || esc(r.type)}</td><td>${esc(r.channel || '—')}</td>
+          <td style="color:${overdue ? 'var(--red)' : 'inherit'}">${r.dueDate ? day(r.dueDate) : '—'}${overdue ? ' ⚠️' : ''}</td>
+          <td>${sb(r.status === 'resolved' ? 'confirmed' : r.status === 'rejected' ? 'cancelled' : 'pending')} ${stLabel[r.status] || esc(r.status)}</td>
+          <td>${['received', 'in_progress'].includes(r.status) ? `<button class="btn small" onclick="_dpResolve('${r.id}')">Resolver</button>` : (r.resolution ? `<span class="muted" title="${esc(r.resolution)}">✔</span>` : '')}</td></tr>`;
+        }).join('')}</table>
+        ${requests.length ? '' : '<p class="muted">Sin solicitudes registradas.</p>'}
+      </div>
+
+      <div class="grid cols-2 mt">
+        <div class="card"><h3>Registro de consentimientos</h3>
+          <div class="row">
+            <div><label>Titular</label><input id="dcName"></div>
+            <div><label>Documento</label><input id="dcDoc"></div>
+            <div><label>Finalidad</label><select id="dcPurpose"><option value="marketing">Marketing</option><option value="tratamiento">Tratamiento</option><option value="imagen">Imagen</option><option value="datos_sensibles">Datos sensibles</option><option value="transferencia">Transferencia</option></select></div>
+            <div><label>Canal</label><select id="dcChannel"><option value="recepcion">Recepción</option><option value="web">Web</option><option value="whatsapp">WhatsApp</option><option value="contrato">Contrato</option><option value="correo">Correo</option></select></div>
+            <button class="btn fit" onclick="_dpConsent()">Registrar</button>
+          </div>
+          <table class="mt"><tr><th>Titular</th><th>Finalidad</th><th>Estado</th><th></th></tr>
+          ${consents.slice(0, 15).map(c => `<tr><td>${esc(c.subjectName)}</td><td>${purposeLabel[c.purpose] || esc(c.purpose)}</td>
+            <td>${c.granted ? sb('confirmed') + ' otorgado' : sb('cancelled') + ' revocado'}</td>
+            <td>${c.granted ? `<button class="btn small ghost" onclick="_dpRevoke('${c.id}')">Revocar</button>` : ''}</td></tr>`).join('')}</table>
+          ${consents.length ? '' : '<p class="muted">Sin consentimientos registrados.</p>'}
+        </div>
+        <div class="card"><h3>Inventario de bases de datos (RNBD)</h3>
+          <table><tr><th>Base</th><th>Finalidad</th><th>Base legal</th><th>RNBD</th></tr>
+          ${treatments.map(t => `<tr><td><b>${esc(t.name)}</b><div class="muted" style="font-size:12px">${esc(t.retention || '')}</div></td><td>${esc(t.purpose)}</td><td>${esc(t.legalBasis || '—')}</td><td>${t.registeredRnbd ? '✅' : '—'}</td></tr>`).join('')}</table>
+          <p class="muted mt" style="font-size:12px">Bases sujetas a registro en el RNBD de la SIC cuando superan los umbrales de ley.</p>
+        </div>
+      </div>`;
+  }
+
   async function viewChannels() {
     const [ov, channels, catalog, mappings, logs, types] = await Promise.all([
       get(`/channels/overview?${pid()}`),
@@ -1870,6 +1960,7 @@
     finance: ['Finanzas, contabilidad y cartera', viewFinance],
     approvals: ['Aprobaciones humanas', viewApprovals],
     compliance: ['Cumplimiento (RNT · TRA · SIRE)', viewCompliance],
+    dataprotection: ['Protección de datos — Habeas Data', viewDataProtection],
     documents: ['Centro documental', viewDocuments],
     audit: ['Auditoría y trazabilidad', viewAudit],
     settings: ['Configuración', viewSettings],

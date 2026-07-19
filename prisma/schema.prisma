@@ -1147,3 +1147,68 @@ model SireReport {
 
   @@index([propertyId, status])
 }
+
+// ===== Protección de datos / Habeas Data (§26, Ley 1581/2012 + RNBD) =====
+
+// Registro de consentimientos del titular (huésped, empleado, lead).
+model DataConsent {
+  id           String   @id @default(cuid())
+  propertyId   String
+  subjectType  String   // guest | employee | lead
+  subjectId    String?  // id interno del titular (opcional)
+  subjectName  String
+  documentNumber String?
+  purpose      String   // marketing | tratamiento | imagen | datos_sensibles | transferencia
+  granted      Boolean  @default(true)
+  channel      String?  // recepcion | web | whatsapp | contrato | correo
+  policyVersion String?
+  source       String?  // nota o referencia de dónde se capturó
+  grantedAt    DateTime @default(now())
+  revokedAt    DateTime?
+  createdBy    String?
+
+  @@index([propertyId, subjectType])
+  @@index([propertyId, documentNumber])
+}
+
+// Solicitudes del titular (derechos ARCO / habeas data): acceso, rectificación,
+// supresión, oposición, revocación. Plazo legal por defecto: 15 días hábiles.
+model DataSubjectRequest {
+  id           String   @id @default(cuid())
+  propertyId   String
+  subjectType  String   @default("guest")
+  subjectName  String
+  documentNumber String?
+  email        String?
+  type         String   // acceso | rectificacion | supresion | oposicion | revocacion
+  channel      String?  // web | correo | recepcion | whatsapp | telefono
+  detail       String?
+  status       String   @default("received") // received | in_progress | resolved | rejected
+  dueDate      DateTime?
+  resolution   String?
+  resolvedBy   String?
+  resolvedAt   DateTime?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([propertyId, status])
+}
+
+// Inventario de bases de datos (Registro Nacional de Bases de Datos - RNBD).
+model DataTreatment {
+  id              String  @id @default(cuid())
+  propertyId      String
+  name            String  // p.ej. Huéspedes, Empleados, CRM/Leads
+  purpose         String
+  legalBasis      String? // consentimiento | contrato | obligacion_legal
+  categories      String? // categorías de datos tratados
+  retention       String? // política de retención
+  security        String? // medidas de seguridad
+  responsible     String? // responsable/encargado
+  registeredRnbd  Boolean @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([propertyId, name])
+}
