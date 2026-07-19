@@ -453,6 +453,73 @@ model AgentProfile {
   @@unique([propertyId, scope])
 }
 
+// ===================== Atria Stock — Compras e inventario (§29) =====================
+
+model Supplier {
+  id           String   @id @default(cuid())
+  propertyId   String
+  name         String
+  nit          String?
+  contact      String?
+  category     String?
+  paymentTerms String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  @@index([propertyId])
+}
+
+model Product {
+  id         String   @id @default(cuid())
+  propertyId String
+  sku        String
+  name       String
+  category   String?  // amenities | limpieza | alimentos | bebidas | minibar | lenceria | repuestos
+  unit       String   @default("unidad")
+  cost       Float    @default(0)
+  stock      Float    @default(0)
+  stockMin   Float    @default(0)
+  warehouse  String?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  movements  StockMovement[]
+
+  @@unique([propertyId, sku])
+  @@index([propertyId, category])
+}
+
+model StockMovement {
+  id         String   @id @default(cuid())
+  propertyId String
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  type       String   // in | out | adjustment | consumption
+  quantity   Float
+  reason     String?
+  reference  String?
+  unitCost   Float?
+  createdBy  String?
+  createdAt  DateTime @default(now())
+
+  @@index([propertyId, createdAt])
+  @@index([productId])
+}
+
+model PurchaseOrder {
+  id           String   @id @default(cuid())
+  propertyId   String
+  supplierId   String
+  supplierName String
+  items        String   // JSON [{productId, name, qty, unitCost, total}]
+  total        Float
+  status       String   @default("draft") // draft | approved | received | cancelled
+  receivedAt   DateTime?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+
+  @@index([propertyId, status])
+}
+
 // ===================== SG-SST (§25) =====================
 
 model SgsstRiskItem {

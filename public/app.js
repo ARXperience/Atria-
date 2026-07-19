@@ -174,6 +174,8 @@
     ['shifts', '📆 Turnos'],
     ['payroll', '💰 Nómina'],
     ['sgsst', '🦺 SG-SST'],
+    ['sep', 'Abastecimiento'],
+    ['inventory', '📦 Inventario'],
     ['sep', 'Gobierno'],
     ['approvals', '✅ Aprobaciones'],
     ['compliance', '⚖️ Cumplimiento'],
@@ -1040,6 +1042,78 @@
       </table>${employees.length ? '' : '<p class="muted">Sin empleados registrados.</p>'}</div>`;
   }
 
+  async function viewInventory() {
+    const [ov, suppliers, products, movements, pos] = await Promise.all([
+      get(`/inventory/overview?${pid()}`),
+      get(`/inventory/suppliers?${pid()}`),
+      get(`/inventory/products?${pid()}`),
+      get(`/inventory/movements?${pid()}`),
+      get(`/inventory/purchase-orders?${pid()}`),
+    ]);
+    const I = (path, body) => api(`/inventory/${path}`, { method: 'POST', body: { propertyId: state.propertyId, ...body } });
+    window._invSup = async () => { try { await I('suppliers', { name: $('#supName').value, nit: $('#supNit').value, contact: $('#supContact').value, category: $('#supCat').value }); toast('Proveedor creado'); render(); } catch (e) { toast(e.message, true); } };
+    window._invProd = async () => { try { await I('products', { sku: $('#pSku').value, name: $('#pName').value, category: $('#pCat').value, unit: $('#pUnit').value, cost: $('#pCost').value, stock: $('#pStock').value, stockMin: $('#pMin').value }); toast('Producto creado'); render(); } catch (e) { toast(e.message, true); } };
+    window._invMove = async () => { try { await I('movements', { productId: $('#mProd').value, type: $('#mType').value, quantity: $('#mQty').value, reason: $('#mReason').value }); toast('Movimiento registrado'); render(); } catch (e) { toast(e.message, true); } };
+    window._invPO = async () => {
+      const prod = $('#poProd').value, qty = +$('#poQty').value, cost = +$('#poCost').value;
+      if (!prod || !(qty > 0)) return toast('Selecciona producto y cantidad', true);
+      try { await I('purchase-orders', { supplierId: $('#poSup').value, items: [{ productId: prod, qty, unitCost: cost }] }); toast('Orden de compra creada'); render(); } catch (e) { toast(e.message, true); }
+    };
+    window._poApprove = async id => { try { const { status } = await api(`/inventory/purchase-orders/${id}/approve`, { method: 'POST' }); toast(status === 202 ? 'Aprobación enviada a gerente' : 'Aprobada'); render(); } catch (e) { toast(e.message, true); } };
+    window._poReceive = async id => { try { await api(`/inventory/purchase-orders/${id}/receive`, { method: 'POST' }); toast('Recibida — stock actualizado'); render(); } catch (e) { toast(e.message, true); } };
+    const prodOpts = products.map(p => `<option value="${p.id}">${esc(p.name)} (${p.stock} ${esc(p.unit)})</option>`).join('');
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Productos</div><div class="value">${ov.products}</div></div>
+        <div class="kpi"><div class="label">Stock bajo</div><div class="value" style="color:${ov.lowStock ? 'var(--yellow)' : 'inherit'}">${ov.lowStock}</div></div>
+        <div class="kpi"><div class="label">Órdenes abiertas</div><div class="value">${ov.openPurchaseOrders}</div></div>
+        <div class="kpi"><div class="label">Proveedores</div><div class="value">${ov.suppliers}</div></div>
+      </div>
+      <div class="card mt"><h3>Productos e insumos</h3>
+        <div class="row">
+          <div><label>SKU</label><input id="pSku"></div><div><label>Nombre</label><input id="pName"></div>
+          <div><label>Categoría</label><select id="pCat"><option value="alimentos">Alimentos</option><option value="bebidas">Bebidas</option><option value="minibar">Minibar</option><option value="amenities">Amenities</option><option value="limpieza">Limpieza</option><option value="lenceria">Lencería</option><option value="repuestos">Repuestos</option></select></div>
+          <div><label>Unidad</label><input id="pUnit" value="unidad"></div>
+        </div>
+        <div class="row">
+          <div><label>Costo</label><input id="pCost" type="number" value="0"></div><div><label>Stock inicial</label><input id="pStock" type="number" value="0"></div><div><label>Stock mínimo</label><input id="pMin" type="number" value="0"></div>
+          <button class="btn fit" onclick="_invProd()">Crear producto</button>
+        </div>
+        <table class="mt"><tr><th>SKU</th><th>Producto</th><th>Categoría</th><th>Costo</th><th>Stock</th><th>Mínimo</th></tr>
+        ${products.map(p => `<tr><td>${esc(p.sku)}</td><td>${esc(p.name)}</td><td>${esc(p.category || '')}</td><td>${cop(p.cost)}</td><td>${p.stock <= p.stockMin ? badge(p.stock + ' ' + p.unit, 'yellow') : p.stock + ' ' + p.unit}</td><td class="muted">${p.stockMin}</td></tr>`).join('')}</table>
+        ${products.length ? '' : '<p class="muted">Sin productos.</p>'}
+      </div>
+      <div class="grid cols-2">
+        <div class="card"><h3>Movimiento de inventario</h3>
+          <div class="row"><div><label>Producto</label><select id="mProd">${prodOpts}</select></div><div><label>Tipo</label><select id="mType"><option value="in">Entrada</option><option value="out">Salida</option><option value="consumption">Consumo</option><option value="adjustment">Ajuste</option></select></div></div>
+          <div class="row"><div><label>Cantidad</label><input id="mQty" type="number"></div><div><label>Motivo</label><input id="mReason" placeholder="merma, uso..."></div><button class="btn fit" onclick="_invMove()">Registrar</button></div>
+          <table class="mt"><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Cant.</th></tr>${movements.slice(0, 12).map(m => `<tr><td>${dt(m.createdAt)}</td><td>${esc(m.product.name)}</td><td>${esc(m.type)}</td><td>${m.quantity}</td></tr>`).join('')}</table>
+        </div>
+        <div class="card"><h3>Proveedores</h3>
+          <div class="row"><div><label>Nombre</label><input id="supName"></div><div><label>NIT</label><input id="supNit"></div></div>
+          <div class="row"><div><label>Contacto</label><input id="supContact"></div><div><label>Categoría</label><input id="supCat"></div><button class="btn fit" onclick="_invSup()">Crear</button></div>
+          <table class="mt"><tr><th>Proveedor</th><th>NIT</th><th>Contacto</th></tr>${suppliers.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.nit || '')}</td><td class="muted">${esc(s.contact || '')}</td></tr>`).join('')}</table>
+          ${suppliers.length ? '' : '<p class="muted">Sin proveedores.</p>'}
+        </div>
+      </div>
+      <div class="card"><h3>Órdenes de compra</h3>
+        <div class="row">
+          <div><label>Proveedor</label><select id="poSup">${suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div>
+          <div><label>Producto</label><select id="poProd">${prodOpts}</select></div>
+          <div><label>Cantidad</label><input id="poQty" type="number"></div>
+          <div><label>Costo unit.</label><input id="poCost" type="number"></div>
+          <button class="btn fit" onclick="_invPO()">Crear orden</button>
+        </div>
+        <table class="mt"><tr><th>Proveedor</th><th>Ítems</th><th>Total</th><th>Estado</th><th></th></tr>
+        ${pos.map(p => `<tr><td>${esc(p.supplierName)}</td><td>${p.items.length}</td><td>${cop(p.total)}</td>
+          <td>${sb(p.status === 'received' ? 'confirmed' : p.status === 'approved' ? 'active' : p.status === 'cancelled' ? 'closed' : 'pending')} ${esc(p.status)}</td>
+          <td>${p.status === 'draft' ? `<button class="btn small" onclick="_poApprove('${p.id}')">Aprobar</button>` : ''}
+              ${p.status === 'approved' ? `<button class="btn small secondary" onclick="_poReceive('${p.id}')">Recibir</button>` : ''}</td>
+        </tr>`).join('')}</table>
+        ${pos.length ? '' : '<p class="muted">Sin órdenes de compra.</p>'}
+      </div>`;
+  }
+
   async function viewSgsst() {
     const [ov, risks, incidents, exams, ppe, trainings, employees] = await Promise.all([
       get(`/sgsst/overview?${pid()}`),
@@ -1534,6 +1608,7 @@
     shifts: ['Turnos y asistencia', viewShifts],
     payroll: ['Nómina colombiana', viewPayroll],
     sgsst: ['SG-SST — Seguridad y Salud en el Trabajo', viewSgsst],
+    inventory: ['Inventario, proveedores y compras', viewInventory],
     approvals: ['Aprobaciones humanas', viewApprovals],
     compliance: ['Cumplimiento (RNT · TRA · SIRE)', viewCompliance],
     documents: ['Centro documental', viewDocuments],

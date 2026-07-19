@@ -85,6 +85,10 @@ const executors = {
     const { applyAmendment } = await import('./contracts.js');
     return applyAmendment(payload);
   },
+  async purchase_order(payload) {
+    const { approvePurchaseOrder } = await import('./inventory.js');
+    return approvePurchaseOrder(payload.purchaseOrderId);
+  },
 };
 
 export async function decideApproval(requestId, { approve, user, note = null }) {

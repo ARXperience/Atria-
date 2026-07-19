@@ -14,6 +14,7 @@ export const DEFAULT_RULES = [
   { key: 'sire_pending', name: 'Reportes SIRE pendientes', severity: 'warning', thresholdDays: null, audienceRole: 'FRONTDESK' },
   { key: 'contract_expiry', name: 'Contratos por vencer', severity: 'warning', thresholdDays: 30, audienceRole: 'HR' },
   { key: 'exam_expiry', name: 'Exámenes médicos por vencer', severity: 'warning', thresholdDays: 30, audienceRole: 'HR' },
+  { key: 'low_stock', name: 'Productos con stock bajo', severity: 'warning', thresholdDays: null, audienceRole: 'MANAGER' },
 ];
 
 export async function ensureDefaultRules(companyId, propertyId = null) {
@@ -57,6 +58,10 @@ const evaluators = {
     const limit = new Date(Date.now() + (rule.thresholdDays || 30) * 86400000);
     const exams = await prisma.medicalExam.findMany({ where: { propertyId: property.id, validUntil: { not: null, lte: limit } }, take: 50 });
     return exams.map(x => ({ propertyId: property.id, title: `Examen médico por vencer: ${x.employeeName}`, body: `Examen ${x.type} vence ${x.validUntil.toISOString().slice(0, 10)} — programar renovación (SG-SST).`, entityId: x.id, entity: 'MedicalExam' }));
+  },
+  async low_stock(_rule, property) {
+    const products = await prisma.product.findMany({ where: { propertyId: property.id, active: true }, take: 200 });
+    return products.filter(p => p.stock <= p.stockMin).map(p => ({ propertyId: property.id, title: `Stock bajo: ${p.name}`, body: `Quedan ${p.stock} ${p.unit} (mínimo ${p.stockMin}). Considerar reposición.`, entityId: p.id, entity: 'Product' }));
   },
 };
 

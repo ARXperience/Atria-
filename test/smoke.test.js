@@ -847,6 +847,57 @@ async function main() {
       assert.equal(create.status, 403, 'auditor no puede crear en SG-SST');
     });
 
+    // ===== Ola 3: Inventario, proveedores y compras (§29) =====
+    let supplierId, productId2;
+    await test('crear proveedor y producto', async () => {
+      const s = await api('/api/inventory/suppliers', { method: 'POST', body: { propertyId, name: 'Distribuidora Andina', nit: '900555111', category: 'alimentos' } });
+      assert.equal(s.status, 201); supplierId = s.data.id;
+      const p = await api('/api/inventory/products', { method: 'POST', body: { propertyId, sku: 'CAFE-1KG', name: 'Café 1kg', category: 'alimentos', unit: 'kg', cost: 25000, stock: 10, stockMin: 5 } });
+      assert.equal(p.status, 201); productId2 = p.data.id;
+    });
+
+    await test('SKU duplicado se rechaza', async () => {
+      const dup = await api('/api/inventory/products', { method: 'POST', body: { propertyId, sku: 'CAFE-1KG', name: 'Otro' } });
+      assert.equal(dup.status, 400);
+    });
+
+    await test('salida de inventario descuenta stock y alerta stock bajo', async () => {
+      const mv = await api('/api/inventory/movements', { method: 'POST', body: { propertyId, productId: productId2, type: 'out', quantity: 6, reason: 'consumo cocina' } });
+      assert.equal(mv.status, 201);
+      assert.equal(mv.data.stock, 4, '10 - 6 = 4');
+      const ov = await api(`/api/inventory/overview?propertyId=${propertyId}`);
+      assert.ok(ov.data.lowStock >= 1, '4 <= mínimo 5 → stock bajo');
+    });
+
+    await test('no permite sacar más stock del disponible', async () => {
+      const mv = await api('/api/inventory/movements', { method: 'POST', body: { propertyId, productId: productId2, type: 'out', quantity: 999 } });
+      assert.equal(mv.status, 400);
+    });
+
+    await test('orden de compra → aprobación de gerente → recepción suma stock', async () => {
+      const po = await api('/api/inventory/purchase-orders', { method: 'POST', body: { propertyId, supplierId, items: [{ productId: productId2, qty: 20, unitCost: 24000 }] } });
+      assert.equal(po.status, 201);
+      assert.equal(po.data.total, 480000);
+      const ap = await api(`/api/inventory/purchase-orders/${po.data.id}/approve`, { method: 'POST' });
+      assert.equal(ap.status, 202);
+      // No se puede recibir sin aprobar
+      const early = await api(`/api/inventory/purchase-orders/${po.data.id}/receive`, { method: 'POST' });
+      assert.equal(early.status, 400);
+      // Gerente aprueba y se recibe
+      await api(`/api/approvals/${ap.data.pendingApproval.id}/decide`, { method: 'POST', body: { approve: true } });
+      const rec = await api(`/api/inventory/purchase-orders/${po.data.id}/receive`, { method: 'POST' });
+      assert.equal(rec.status, 200);
+      const prods = await api(`/api/inventory/products?propertyId=${propertyId}`);
+      assert.equal(prods.data.find(p => p.id === productId2).stock, 24, '4 + 20 recibidos = 24');
+    });
+
+    await test('regla low_stock detecta productos bajo mínimo', async () => {
+      // Bajar el café por debajo del mínimo de nuevo
+      await api('/api/inventory/movements', { method: 'POST', body: { propertyId, productId: productId2, type: 'out', quantity: 20 } });
+      const run = await api('/api/documents/rules/run', { method: 'POST' });
+      assert.ok((run.data.detail || []).some(f => f.rule === 'low_stock'), 'la regla low_stock genera hallazgo');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {
