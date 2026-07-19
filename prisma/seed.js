@@ -125,6 +125,31 @@ async function main() {
     });
   }
 
+  // Segunda sede (§8 multi-sede): permite consolidar el portafolio.
+  const property2 = await prisma.property.create({
+    data: {
+      companyId: company.id,
+      name: 'Atria Hotel Medellín',
+      address: 'Cra 43A # 7-50, El Poblado',
+      city: 'Medellín',
+      rnt: 'RNT-654321',
+      rntExpiresAt: new Date(Date.UTC(new Date().getUTCFullYear() + 1, 5, 30)),
+      taxRate: 0.19,
+    },
+  });
+  for (const [name, code, capacity, baseRate, desc, count, floorBase] of [
+    ['Estándar', 'STD', 2, 210000, 'Cama queen, WiFi, aire', 3, 1],
+    ['Superior', 'SUP', 3, 300000, 'Balcón con vista al Poblado', 2, 2],
+    ['Suite', 'STE', 4, 450000, 'Sala, jacuzzi y terraza', 1, 3],
+  ]) {
+    const rt = await prisma.roomType.create({ data: { propertyId: property2.id, name, code, capacity, baseRate, description: desc } });
+    await prisma.ratePlan.create({ data: { propertyId: property2.id, roomTypeId: rt.id, name: 'Flexible', code: `${code}-FLEX`, price: baseRate, refundable: true, depositPct: 0.5 } });
+    await prisma.ratePlan.create({ data: { propertyId: property2.id, roomTypeId: rt.id, name: 'No reembolsable', code: `${code}-NR`, price: Math.round(baseRate * 0.88), refundable: false, depositPct: 1.0 } });
+    for (let i = 1; i <= count; i++) {
+      await prisma.room.create({ data: { propertyId: property2.id, roomTypeId: rt.id, number: `${floorBase}0${i}`, floor: String(floorBase) } });
+    }
+  }
+
   // Usuarios por rol (contraseña: atria2026)
   const pass = await bcrypt.hash('atria2026', 10);
   const users = [
@@ -164,7 +189,7 @@ async function main() {
 
   console.log('✅ Seed completado.');
   console.log(`   Empresa: ${company.name}`);
-  console.log(`   Sede:    ${property.name} (${property.id})`);
+  console.log(`   Sedes:   ${property.name} · ${property2.name}`);
   console.log('   Usuarios (contraseña: atria2026):');
   for (const [, email, role] of users) console.log(`     - ${email} (${role})`);
 }

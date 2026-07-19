@@ -154,6 +154,7 @@
   // ---------- shell ----------
   const NAV = [
     ['sep', 'Operación'],
+    ['portfolio', '🏢 Portafolio'],
     ['dashboard', '📊 Dashboard'],
     ['rooms', '🛏️ Habitaciones'],
     ['reservations', '📅 Reservas'],
@@ -237,6 +238,43 @@
   const pid = () => `propertyId=${state.propertyId}`;
 
   // ---------- vistas ----------
+  async function viewPortfolio() {
+    const p = await get('/portfolio/overview');
+    const t = p.totals;
+    window._goSite = id => { state.propertyId = id; localStorage.setItem('atria_prop', id); location.hash = 'dashboard'; };
+    setTimeout(animateCounts, 0);
+    const heat = pct => pct >= 75 ? 'var(--green)' : pct >= 45 ? 'var(--yellow)' : 'var(--red)';
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Sedes</div><div class="value">${p.count}</div></div>
+        <div class="kpi"><div class="label">Ocupación consolidada</div><div class="value" style="color:${heat(t.occupancyPct)}"><span data-count="${t.occupancyPct}" data-fmt="pct">0%</span><small> ${t.occupied}/${t.sellable}</small></div></div>
+        <div class="kpi"><div class="label">Ingresos del mes</div><div class="value" style="color:var(--green)"><span data-count="${t.monthRevenue}" data-fmt="cop">$0</span></div></div>
+        <div class="kpi"><div class="label">Cartera por cobrar</div><div class="value" style="color:${t.receivable ? 'var(--yellow)' : 'inherit'}"><span data-count="${t.receivable}" data-fmt="cop">$0</span></div></div>
+      </div>
+      <div class="card mt"><h3>Sedes del portafolio</h3>
+        <table><tr><th>Sede</th><th>Ciudad</th><th>Ocupación</th><th>En casa</th><th>ADR</th><th>RevPAR</th><th>Ingresos mes</th><th>Cartera</th><th>Aprob.</th><th></th></tr>
+        ${p.sites.map(s => `<tr class="clickable" onclick="_goSite('${s.id}')">
+          <td><b>${esc(s.name)}</b><div class="muted" style="font-size:12px">${esc(s.rnt || '')}</div></td>
+          <td>${esc(s.city || '—')}</td>
+          <td><span style="color:${heat(s.occupancyPct)}">${s.occupancyPct}%</span> <span class="muted" style="font-size:12px">${s.occupied}/${s.sellable}</span></td>
+          <td>${s.inHouse}</td>
+          <td>${cop(s.adr)}</td>
+          <td>${cop(s.revpar)}</td>
+          <td><b>${cop(s.monthRevenue)}</b></td>
+          <td>${s.receivable ? `<span style="color:var(--yellow)">${cop(s.receivable)}</span>` : '—'}</td>
+          <td>${s.pendingApprovals ? sb('pending') + ' ' + s.pendingApprovals : '—'}</td>
+          <td><span class="muted">Abrir →</span></td></tr>`).join('')}
+        <tr style="border-top:2px solid var(--border)"><td><b>Total</b></td><td></td>
+          <td><b style="color:${heat(t.occupancyPct)}">${t.occupancyPct}%</b></td>
+          <td><b>${t.inHouse}</b></td><td></td><td></td>
+          <td><b>${cop(t.monthRevenue)}</b></td>
+          <td><b>${t.receivable ? cop(t.receivable) : '—'}</b></td>
+          <td><b>${t.pendingApprovals || '—'}</b></td><td></td></tr>
+        </table>
+        <p class="muted mt" style="font-size:12px">Consolida las sedes a las que tienes acceso. Haz clic en una sede para abrir su tablero.</p>
+      </div>`;
+  }
+
   async function viewDashboard() {
     const d = await get(`/dashboard?${pid()}`);
     setTimeout(animateCounts, 0);
@@ -1971,6 +2009,7 @@
 
   // ---------- router ----------
   const VIEWS = {
+    portfolio: ['Portafolio — consolidado multi-sede', viewPortfolio],
     dashboard: ['Dashboard gerencial', viewDashboard],
     rooms: ['Mapa de habitaciones', viewRooms],
     reservations: ['Reservas', viewReservations],

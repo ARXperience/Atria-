@@ -1244,6 +1244,32 @@ async function main() {
       assert.equal(res.status, 403);
     });
 
+    // ===== Ola 6: Consolidación multi-sede (§8) =====
+    await test('portafolio consolida las sedes de la empresa', async () => {
+      const { status, data } = await api('/api/portfolio/overview');
+      assert.equal(status, 200);
+      assert.ok(data.count >= 2, 'la demo tiene al menos dos sedes');
+      assert.ok(Array.isArray(data.sites) && data.sites.length === data.count);
+      const s0 = data.sites[0];
+      assert.ok('occupancyPct' in s0 && 'monthRevenue' in s0 && 'receivable' in s0 && 'adr' in s0);
+    });
+
+    await test('totales del portafolio suman las sedes', async () => {
+      const { data } = await api('/api/portfolio/overview');
+      const sumRooms = data.sites.reduce((s, x) => s + x.rooms, 0);
+      const sumRevenue = data.sites.reduce((s, x) => s + x.monthRevenue, 0);
+      assert.equal(data.totals.rooms, sumRooms);
+      assert.equal(data.totals.monthRevenue, sumRevenue);
+      assert.ok(data.totals.occupancyPct >= 0 && data.totals.occupancyPct <= 100);
+    });
+
+    await test('la sede con reservas del mes reporta ingresos', async () => {
+      const { data } = await api('/api/portfolio/overview');
+      const bog = data.sites.find(s => s.id === propertyId);
+      assert.ok(bog, 'la sede de pruebas debe estar en el portafolio');
+      assert.ok(bog.monthRevenue > 0, 'la sede operada durante las pruebas debe tener ingresos');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {
