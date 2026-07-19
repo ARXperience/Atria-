@@ -1212,3 +1212,26 @@ model DataTreatment {
 
   @@unique([propertyId, name])
 }
+
+// ===== FONTUR — contribución parafiscal del turismo (§27, Ley 2068/2020) =====
+// Aporte trimestral sobre ingresos operacionales (tarifa versionada en
+// LegalParameter FONTUR_TARIFA, p.ej. 2.5 por mil para hoteles).
+model FonturContribution {
+  id              String   @id @default(cuid())
+  propertyId      String
+  period          String   // p.ej. 2026-T3
+  periodStart     DateTime
+  periodEnd       DateTime
+  operatingIncome Float    // base gravable del trimestre
+  rate            Float    // tarifa aplicada (versionada)
+  amount          Float    // contribución = base * tarifa
+  status          String   @default("draft") // draft | filed | paid
+  filedAt         DateTime?
+  paidAt          DateTime?
+  support         String?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([propertyId, period])
+}

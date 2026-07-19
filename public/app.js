@@ -187,6 +187,7 @@
     ['approvals', '✅ Aprobaciones'],
     ['compliance', '⚖️ Cumplimiento'],
     ['dataprotection', '🛡️ Protección de datos'],
+    ['fontur', '🏝️ FONTUR parafiscal'],
     ['documents', '📁 Documentos'],
     ['audit', '🔍 Auditoría'],
     ['settings', '⚙️ Configuración'],
@@ -1216,6 +1217,41 @@
       </div>`;
   }
 
+  async function viewFontur() {
+    const ov = await get(`/fontur/overview?${pid()}`);
+    const stLabel = { draft: 'Borrador', filed: 'Presentada', paid: 'Pagada' };
+    const perMil = (ov.current.rate * 1000).toLocaleString('es-CO', { maximumFractionDigits: 2 });
+    window._ftGen = async () => { try { await api('/fontur/generate', { method: 'POST', body: { propertyId: state.propertyId } }); toast('Contribución del trimestre generada'); render(); } catch (e) { toast(e.message, true); } };
+    window._ftFile = async id => { try { await api(`/fontur/${id}/file`, { method: 'POST' }); toast('Contribución presentada'); render(); } catch (e) { toast(e.message, true); } };
+    window._ftPay = async id => { const s = prompt('Soporte/referencia del pago FONTUR:'); if (s === null) return; try { await api(`/fontur/${id}/pay`, { method: 'POST', body: { support: s } }); toast('Pago registrado'); render(); } catch (e) { toast(e.message, true); } };
+    setTimeout(animateCounts, 0);
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Base operacional (${esc(ov.current.period)})</div><div class="value"><span data-count="${ov.current.operatingIncome}" data-fmt="cop">$0</span></div></div>
+        <div class="kpi"><div class="label">Tarifa vigente</div><div class="value">${perMil}<small> ×1000</small></div></div>
+        <div class="kpi"><div class="label">Contribución estimada</div><div class="value" style="color:var(--yellow)"><span data-count="${ov.current.amount}" data-fmt="cop">$0</span></div></div>
+        <div class="kpi"><div class="label">Pagado en el año</div><div class="value" style="color:var(--green)"><span data-count="${ov.paidYtd}" data-fmt="cop">$0</span></div></div>
+      </div>
+
+      <div class="card mt">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div><h3 style="margin:0">Trimestre actual · ${esc(ov.current.period)}</h3>
+            <p class="muted" style="margin:.3rem 0 0">Base ${cop(ov.current.operatingIncome)} × ${perMil} por mil = <b>${cop(ov.current.amount)}</b></p></div>
+          <button class="btn" onclick="_ftGen()">Generar / actualizar declaración</button>
+        </div>
+      </div>
+
+      <div class="card mt"><h3>Historial de contribuciones</h3>
+        ${ov.contributions.length ? `<table><tr><th>Periodo</th><th>Base operacional</th><th>Tarifa</th><th>Contribución</th><th>Estado</th><th></th></tr>
+        ${ov.contributions.map(c => `<tr><td><b>${esc(c.period)}</b></td><td>${cop(c.operatingIncome)}</td><td>${(c.rate * 1000).toLocaleString('es-CO', { maximumFractionDigits: 2 })} ×1000</td><td><b>${cop(c.amount)}</b></td>
+          <td>${sb(c.status === 'paid' ? 'paid' : c.status === 'filed' ? 'prepared' : 'pending')} ${stLabel[c.status] || esc(c.status)}</td>
+          <td>${c.status === 'draft' ? `<button class="btn small ghost" onclick="_ftFile('${c.id}')">Presentar</button>` : ''}
+              ${c.status !== 'paid' ? `<button class="btn small" onclick="_ftPay('${c.id}')">Pagar</button>` : ''}</td>
+        </tr>`).join('')}</table>` : '<p class="muted">Aún no hay declaraciones. Genera la del trimestre actual.</p>'}
+        <p class="muted mt" style="font-size:12px">Contribución parafiscal para la promoción del turismo (Ley 2068/2020). Base: ingresos operacionales del trimestre. La tarifa se administra como parámetro legal versionado.</p>
+      </div>`;
+  }
+
   async function viewChannels() {
     const [ov, channels, catalog, mappings, logs, types] = await Promise.all([
       get(`/channels/overview?${pid()}`),
@@ -1961,6 +1997,7 @@
     approvals: ['Aprobaciones humanas', viewApprovals],
     compliance: ['Cumplimiento (RNT · TRA · SIRE)', viewCompliance],
     dataprotection: ['Protección de datos — Habeas Data', viewDataProtection],
+    fontur: ['FONTUR — contribución parafiscal del turismo', viewFontur],
     documents: ['Centro documental', viewDocuments],
     audit: ['Auditoría y trazabilidad', viewAudit],
     settings: ['Configuración', viewSettings],

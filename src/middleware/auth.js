@@ -13,7 +13,7 @@ const PERMISSIONS = {
     'dashboard.view', 'reservations.*', 'booking.*', 'rooms.*', 'guests.*', 'crm.*', 'inbox.*',
     'payments.*', 'housekeeping.*', 'maintenance.*', 'compliance.*', 'approvals.*', 'audit.view',
     'settings.view', 'whatsapp.*', 'notifications.*', 'users.view', 'users.manage', 'settings.edit',
-    'hr.*', 'payroll.view', 'payroll.manage', 'invoices.*', 'documents.*', 'content.*', 'sgsst.*', 'inventory.*', 'pos.*', 'revenue.*', 'channels.*', 'finance.*', 'dataprotection.*',
+    'hr.*', 'payroll.view', 'payroll.manage', 'invoices.*', 'documents.*', 'content.*', 'sgsst.*', 'inventory.*', 'pos.*', 'revenue.*', 'channels.*', 'finance.*', 'dataprotection.*', 'fontur.*',
   ],
   FRONTDESK: [
     'dashboard.view', 'reservations.*', 'booking.*', 'rooms.view', 'rooms.status', 'guests.*',
@@ -31,10 +31,10 @@ const PERMISSIONS = {
   MAINTENANCE: ['maintenance.*', 'rooms.view', 'notifications.*'],
   ACCOUNTING: [
     'dashboard.view', 'payments.*', 'reservations.view', 'compliance.view', 'audit.view',
-    'approvals.view', 'notifications.*', 'invoices.*', 'payroll.view', 'hr.view', 'documents.view', 'inventory.view', 'finance.*',
+    'approvals.view', 'notifications.*', 'invoices.*', 'payroll.view', 'hr.view', 'documents.view', 'inventory.view', 'finance.*', 'fontur.*',
   ],
   HR: ['dashboard.view', 'notifications.*', 'audit.view', 'hr.*', 'payroll.*', 'documents.*', 'approvals.view', 'approvals.decide', 'sgsst.*', 'dataprotection.view', 'dataprotection.consent'],
-  AUDITOR: ['audit.view', 'dashboard.view', 'reservations.view', 'payments.view', 'compliance.view', 'approvals.view', 'invoices.view', 'payroll.view', 'hr.view', 'documents.view', 'sgsst.view', 'finance.view', 'dataprotection.view'],
+  AUDITOR: ['audit.view', 'dashboard.view', 'reservations.view', 'payments.view', 'compliance.view', 'approvals.view', 'invoices.view', 'payroll.view', 'hr.view', 'documents.view', 'sgsst.view', 'finance.view', 'dataprotection.view', 'fontur.view'],
 };
 
 export function hasPermission(role, perm) {

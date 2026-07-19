@@ -1198,6 +1198,52 @@ async function main() {
       assert.equal(denied.status, 403);
     });
 
+    // ===== Ola 6: FONTUR — contribución parafiscal del turismo (§27) =====
+    let fonturId;
+    await test('preview FONTUR calcula base × tarifa del trimestre', async () => {
+      const { status, data } = await api(`/api/fontur/preview?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(/^\d{4}-T[1-4]$/.test(data.period), 'periodo trimestral');
+      assert.ok(data.rate > 0 && data.rate < 0.01, 'tarifa por mil');
+      assert.equal(data.amount, Math.round(data.operatingIncome * data.rate));
+    });
+
+    await test('generar contribución FONTUR del trimestre', async () => {
+      const { status, data } = await api('/api/fontur/generate', { method: 'POST', body: { propertyId } });
+      assert.equal(status, 201);
+      fonturId = data.id;
+      assert.equal(data.status, 'draft');
+      assert.ok(data.amount >= 0);
+    });
+
+    await test('generar de nuevo es idempotente (mismo periodo)', async () => {
+      const first = await api(`/api/fontur/overview?propertyId=${propertyId}`);
+      await api('/api/fontur/generate', { method: 'POST', body: { propertyId } });
+      const second = await api(`/api/fontur/overview?propertyId=${propertyId}`);
+      const drafts = second.data.contributions.filter(c => c.period === first.data.current.period);
+      assert.equal(drafts.length, 1, 'no debe duplicar el periodo');
+    });
+
+    await test('presentar y pagar la contribución actualiza estado y YTD', async () => {
+      const filed = await api(`/api/fontur/${fonturId}/file`, { method: 'POST' });
+      assert.equal(filed.data.status, 'filed');
+      const paid = await api(`/api/fontur/${fonturId}/pay`, { method: 'POST', body: { support: 'PSE-FONTUR-01' } });
+      assert.equal(paid.data.status, 'paid');
+      const ov = await api(`/api/fontur/overview?propertyId=${propertyId}`);
+      assert.ok(ov.data.paidYtd >= paid.data.amount);
+    });
+
+    await test('no se puede recalcular un periodo ya pagado', async () => {
+      const { status } = await api('/api/fontur/generate', { method: 'POST', body: { propertyId } });
+      assert.equal(status, 400);
+    });
+
+    await test('rol housekeeping no puede ver FONTUR (permisos backend)', async () => {
+      const { data: login } = await api('/api/auth/login', { method: 'POST', body: { email: 'housekeeping@atria.co', password: 'atria2026' } });
+      const res = await fetch(`${BASE}/api/fontur/overview?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${login.token}` } });
+      assert.equal(res.status, 403);
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {
