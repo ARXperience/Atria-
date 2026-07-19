@@ -669,6 +669,56 @@ async function main() {
       assert.equal(target.aiEnabled, false, 'la IA queda en pausa tras escalar');
     });
 
+    // ===== Ola 2: Contratos laborales (§20) =====
+    let contractId, hrToken;
+    await test('login RR.HH.', async () => {
+      const { status, data } = await api('/api/auth/login', { method: 'POST', body: { email: 'rrhh@atria.co', password: 'atria2026' } });
+      assert.equal(status, 200);
+      hrToken = data.token;
+    });
+    const hr = (path, opts = {}) => fetch(`${BASE}${path}`, { ...opts, headers: { 'content-type': 'application/json', authorization: `Bearer ${hrToken}`, ...(opts.headers || {}) }, body: opts.body ? JSON.stringify(opts.body) : undefined }).then(async r => ({ status: r.status, data: await r.json().catch(() => ({})) }));
+
+    await test('generar borrador de contrato', async () => {
+      const { status, data } = await hr('/api/hr/contracts', { method: 'POST', body: { employeeId, type: 'fijo', workday: 'Tiempo completo', endDate: futureDay(365), functions: 'Atención en cocina' } });
+      assert.equal(status, 201);
+      contractId = data.id;
+      assert.equal(data.status, 'draft');
+    });
+
+    await test('texto del contrato incluye empleado y salario', async () => {
+      const { data } = await hr(`/api/hr/contracts/${contractId}/text`);
+      assert.match(data.text, /CONTRATO INDIVIDUAL DE TRABAJO/);
+      assert.match(data.text, /Pedro N[oó]mina Test/);
+    });
+
+    await test('activar contrato → aprobación de RR.HH. → empleado sincronizado', async () => {
+      const act = await hr(`/api/hr/contracts/${contractId}/activate`, { method: 'POST' });
+      assert.equal(act.status, 202);
+      const approvalId = act.data.pendingApproval.id;
+      // Recepción NO puede aprobar (rango insuficiente)
+      const { data: fd } = await api('/api/auth/login', { method: 'POST', body: { email: 'recepcion@atria.co', password: 'atria2026' } });
+      const deny = await fetch(`${BASE}/api/approvals/${approvalId}/decide`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${fd.token}` }, body: JSON.stringify({ approve: true }) });
+      assert.ok(deny.status === 403 || deny.status === 400, 'recepción no debe poder aprobar contratos');
+      // RR.HH. aprueba
+      const ok = await hr(`/api/approvals/${approvalId}/decide`, { method: 'POST', body: { approve: true } });
+      assert.equal(ok.status, 200);
+      const { data: c } = await hr(`/api/hr/contracts/${contractId}/text`);
+      assert.equal(c.contract.status, 'active');
+      // El empleado quedó con el tipo de contrato del contrato activado
+      const { data: emps } = await hr(`/api/hr/employees?propertyId=${propertyId}`);
+      const pedro = emps.find(e => e.id === employeeId);
+      assert.equal(pedro.contractType, 'fijo');
+    });
+
+    await test('otrosí de salario → aprobación → aplica al contrato y empleado', async () => {
+      const am = await hr(`/api/hr/contracts/${contractId}/amendments`, { method: 'POST', body: { changeType: 'salary', newValue: 2100000, detail: 'Aumento salarial' } });
+      assert.equal(am.status, 202);
+      const ok = await hr(`/api/approvals/${am.data.pendingApproval.id}/decide`, { method: 'POST', body: { approve: true } });
+      assert.equal(ok.status, 200);
+      const { data: emps } = await hr(`/api/hr/employees?propertyId=${propertyId}`);
+      assert.equal(emps.find(e => e.id === employeeId).salary, 2100000);
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

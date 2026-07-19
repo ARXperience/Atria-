@@ -21,6 +21,7 @@ npm start                # http://localhost:4000
 | ventas@atria.co | Ventas |
 | housekeeping@atria.co | Housekeeping |
 | contabilidad@atria.co | Contabilidad |
+| rrhh@atria.co | RR. HH. |
 | auditor@atria.co | Auditor (solo lectura) |
 
 **Pruebas end-to-end**: `npm test` (62 pruebas de los flujos críticos de la sección 48 del documento).

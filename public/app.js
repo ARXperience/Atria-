@@ -925,6 +925,54 @@
         toast('Empleado creado'); render();
       } catch (err) { toast(err.message, true); }
     };
+    window._contracts = async (empId, empName) => {
+      const list = await get(`/hr/contracts?${pid()}&employeeId=${empId}`);
+      const m = modal(`
+        <h2>Contratos — ${esc(empName)}</h2>
+        <div id="ctList">${list.length ? list.map(c => `
+          <div class="card" style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div><b>${esc(c.type)}</b> · ${esc(c.position)} · ${cop(c.salary)}
+                <div class="muted" style="font-size:12px">desde ${day(c.startDate)}${c.endDate ? ' hasta ' + day(c.endDate) : ''} · ${c._count.amendments} otrosí(es)</div></div>
+              <div>${sb(c.status === 'active' ? 'confirmed' : c.status === 'ended' ? 'closed' : 'pending')} ${esc(c.status)}</div>
+            </div>
+            <div class="row mt">
+              <button class="btn small secondary fit" onclick="_ctText('${c.id}')">Ver texto</button>
+              ${c.status === 'draft' ? `<button class="btn small fit" onclick="_ctActivate('${c.id}')">Activar (aprueba RR.HH.)</button>` : ''}
+              ${c.status === 'active' ? `<button class="btn small secondary fit" onclick="_ctAmend('${c.id}')">Crear otrosí</button>` : ''}
+            </div>
+          </div>`).join('') : '<p class="muted">Sin contratos aún.</p>'}</div>
+        <h3 class="mt">Generar contrato</h3>
+        <div class="row">
+          <div><label>Tipo</label><select id="ctType"><option value="indefinido">Indefinido</option><option value="fijo">Fijo</option><option value="obra">Obra o labor</option><option value="aprendizaje">Aprendizaje</option></select></div>
+          <div><label>Jornada</label><input id="ctWork" value="Tiempo completo"></div>
+          <div><label>Fin (si es fijo)</label><input id="ctEnd" type="date"></div>
+        </div>
+        <label>Funciones</label><input id="ctFunc" placeholder="Las propias del cargo...">
+        <button class="btn mt" id="ctGen">Generar borrador</button>`);
+      m.querySelector('#ctGen').onclick = async () => {
+        try {
+          await api('/hr/contracts', { method: 'POST', body: { employeeId: empId, type: m.querySelector('#ctType').value, workday: m.querySelector('#ctWork').value, endDate: m.querySelector('#ctEnd').value || null, functions: m.querySelector('#ctFunc').value } });
+          toast('Borrador de contrato creado'); m.remove(); window._contracts(empId, empName);
+        } catch (err) { toast(err.message, true); }
+      };
+      window._ctText = async id => {
+        const { data } = await api(`/hr/contracts/${id}/text`);
+        modal(`<h2>Contrato</h2><pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.6">${esc(data.text)}</pre>`);
+      };
+      window._ctActivate = async id => {
+        try { await api(`/hr/contracts/${id}/activate`, { method: 'POST' }); toast('Activación enviada a aprobación de RR.HH.'); m.remove(); render(); }
+        catch (err) { toast(err.message, true); }
+      };
+      window._ctAmend = async id => {
+        const type = prompt('Tipo de otrosí (salary, position, workday, functions, extension):', 'salary');
+        if (!type) return;
+        const val = prompt('Nuevo valor:');
+        if (!val) return;
+        try { await api(`/hr/contracts/${id}/amendments`, { method: 'POST', body: { changeType: type, newValue: val, detail: `Cambio de ${type}` } }); toast('Otrosí enviado a aprobación'); m.remove(); render(); }
+        catch (err) { toast(err.message, true); }
+      };
+    };
     window._simLiq = async id => {
       try {
         const { data } = await api('/hr/liquidations/simulate', { method: 'POST', body: { employeeId: id, cause: 'renuncia' } });
@@ -963,7 +1011,8 @@
           <td>${cop(e.salary)}</td><td>${day(e.hireDate)}</td>
           <td class="muted" style="font-size:12px">${esc(e.eps || '⚠ sin EPS')} / ${esc(e.afp || '⚠ sin AFP')}</td>
           <td>${e.status === 'active' ? badge('Activo', 'green') : badge('Retirado', 'gray')}</td>
-          <td><button class="btn small secondary" onclick="_simLiq('${e.id}')">Simular liquidación</button></td>
+          <td><button class="btn small secondary" onclick="_contracts('${e.id}','${esc(e.fullName).replace(/'/g, '&#39;')}')">Contrato</button>
+              <button class="btn small secondary" onclick="_simLiq('${e.id}')">Liquidación</button></td>
         </tr>`).join('')}
       </table>${employees.length ? '' : '<p class="muted">Sin empleados registrados.</p>'}</div>`;
   }

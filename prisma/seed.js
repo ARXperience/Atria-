@@ -134,6 +134,7 @@ async function main() {
     ['Ventas Demo', 'ventas@atria.co', 'SALES'],
     ['Housekeeping Demo', 'housekeeping@atria.co', 'HOUSEKEEPING'],
     ['Contabilidad Demo', 'contabilidad@atria.co', 'ACCOUNTING'],
+    ['RR.HH. Demo', 'rrhh@atria.co', 'HR'],
     ['Auditor Demo', 'auditor@atria.co', 'AUDITOR'],
   ];
   for (const [name, email, role] of users) {

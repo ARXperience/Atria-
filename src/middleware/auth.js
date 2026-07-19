@@ -32,7 +32,7 @@ const PERMISSIONS = {
     'dashboard.view', 'payments.*', 'reservations.view', 'compliance.view', 'audit.view',
     'approvals.view', 'notifications.*', 'invoices.*', 'payroll.view', 'hr.view', 'documents.view',
   ],
-  HR: ['dashboard.view', 'notifications.*', 'audit.view', 'hr.*', 'payroll.*', 'documents.*'],
+  HR: ['dashboard.view', 'notifications.*', 'audit.view', 'hr.*', 'payroll.*', 'documents.*', 'approvals.view', 'approvals.decide'],
   AUDITOR: ['audit.view', 'dashboard.view', 'reservations.view', 'payments.view', 'compliance.view', 'approvals.view', 'invoices.view', 'payroll.view', 'hr.view', 'documents.view'],
 };
 

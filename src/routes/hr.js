@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
 import { calculatePeriod, closePeriod, simulateLiquidation, noveltyTypes } from '../services/payroll.js';
+import { createDraftContract, renderContractText } from '../services/contracts.js';
 import { requestApproval } from '../services/approvals.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, fmtCOP } from '../lib/util.js';
@@ -157,6 +158,65 @@ hrRouter.post('/payroll/periods/:id/close', requirePermission('payroll.manage'),
     summary: `Cerrar nómina ${period.month}/${period.year}: neto a pagar ${fmtCOP(period.totalNet || 0)} + costo patronal ${fmtCOP(period.totalEmployerCost || 0)}`,
     payload: { periodId: period.id },
     requiredRole: 'OWNER', user: req.user,
+  });
+  res.status(202).json({ pendingApproval: approval });
+});
+
+// ---- Contratos laborales (§20) ----
+hrRouter.get('/contracts', requirePermission('hr.view'), async (req, res) => {
+  const { propertyId, employeeId } = req.query;
+  if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const where = { propertyId };
+  if (employeeId) where.employeeId = employeeId;
+  const contracts = await prisma.employmentContract.findMany({
+    where, include: { employee: { select: { fullName: true } }, _count: { select: { amendments: true } } },
+    orderBy: { createdAt: 'desc' }, take: 200,
+  });
+  res.json(contracts);
+});
+
+hrRouter.get('/contracts/:id/text', requirePermission('hr.view'), async (req, res) => {
+  const c = await prisma.employmentContract.findUnique({ where: { id: req.params.id }, include: { amendments: true } });
+  if (!c || !propertyScope(req, c.propertyId)) return res.status(404).json({ error: 'Contrato no encontrado' });
+  try {
+    res.json({ contract: c, text: await renderContractText(c.id) });
+  } catch (err) { badRequest(res, err.message); }
+});
+
+hrRouter.post('/contracts', requirePermission('hr.manage'), async (req, res) => {
+  const { employeeId } = req.body || {};
+  const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
+  if (!employee || !propertyScope(req, employee.propertyId)) return res.status(404).json({ error: 'Empleado no encontrado' });
+  const contract = await createDraftContract({ companyId: req.user.companyId, employee, data: req.body, createdBy: req.user.name });
+  res.status(201).json(contract);
+});
+
+// Activar contrato → aprobación de RR. HH. (matriz §47)
+hrRouter.post('/contracts/:id/activate', requirePermission('hr.manage'), async (req, res) => {
+  const c = await prisma.employmentContract.findUnique({ where: { id: req.params.id }, include: { employee: true } });
+  if (!c || !propertyScope(req, c.propertyId)) return res.status(404).json({ error: 'Contrato no encontrado' });
+  if (c.status !== 'draft') return badRequest(res, `El contrato ya está ${c.status}`);
+  const approval = await requestApproval({
+    propertyId: c.propertyId, type: 'contract_activate',
+    summary: `Activar contrato ${c.type} de ${c.employee.fullName} — cargo ${c.position}, ${fmtCOP(c.salary)}`,
+    payload: { contractId: c.id }, requiredRole: 'HR', user: req.user,
+  });
+  res.status(202).json({ pendingApproval: approval });
+});
+
+// Otrosí → aprobación de RR. HH.
+hrRouter.post('/contracts/:id/amendments', requirePermission('hr.manage'), async (req, res) => {
+  const { changeType, newValue, detail, reason, effectiveDate } = req.body || {};
+  const valid = ['salary', 'position', 'workday', 'functions', 'extension'];
+  if (!valid.includes(changeType)) return badRequest(res, `changeType inválido. Use: ${valid.join(', ')}`);
+  if (newValue === undefined || newValue === '') return badRequest(res, 'newValue requerido');
+  const c = await prisma.employmentContract.findUnique({ where: { id: req.params.id }, include: { employee: true } });
+  if (!c || !propertyScope(req, c.propertyId)) return res.status(404).json({ error: 'Contrato no encontrado' });
+  const approval = await requestApproval({
+    propertyId: c.propertyId, type: 'contract_amend',
+    summary: `Otrosí (${changeType}) al contrato de ${c.employee.fullName}: ${detail || newValue}`,
+    payload: { contractId: c.id, changeType, newValue, detail, reason, effectiveDate, createdBy: req.user.name },
+    requiredRole: 'HR', user: req.user,
   });
   res.status(202).json({ pendingApproval: approval });
 });

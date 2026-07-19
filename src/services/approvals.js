@@ -77,6 +77,14 @@ const executors = {
     const { softDeleteDocument } = await import('./documents.js');
     return softDeleteDocument(payload.documentId);
   },
+  async contract_activate(payload) {
+    const { activateContract } = await import('./contracts.js');
+    return activateContract(payload.contractId);
+  },
+  async contract_amend(payload) {
+    const { applyAmendment } = await import('./contracts.js');
+    return applyAmendment(payload);
+  },
 };
 
 export async function decideApproval(requestId, { approve, user, note = null }) {
