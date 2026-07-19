@@ -1019,6 +1019,64 @@ async function main() {
       assert.equal(ap.data.price, before + 50000);
     });
 
+    // ===== Ola 4: Channel manager (§35) =====
+    let channelId, otaRoomTypeId;
+    await test('agregar canal, mapear habitación y sincronizar', async () => {
+      const ch = await api('/api/channels', { method: 'POST', body: { propertyId, code: 'booking' } });
+      assert.equal(ch.status, 201); channelId = ch.data.id;
+      await api(`/api/channels/${channelId}`, { method: 'PATCH', body: { enabled: true } });
+      const types = await api(`/api/admin/room-types?propertyId=${propertyId}`);
+      otaRoomTypeId = types.data[0].id;
+      const map = await api('/api/channels/mappings', { method: 'POST', body: { propertyId, channelId, roomTypeId: otaRoomTypeId, externalCode: 'DBL-STD' } });
+      assert.equal(map.status, 201);
+      const sync = await api(`/api/channels/${channelId}/sync`, { method: 'POST' });
+      assert.equal(sync.status, 200);
+      assert.equal(sync.data.status, 'connected');
+      const logs = await api(`/api/channels/logs?propertyId=${propertyId}`);
+      assert.ok(logs.data.some(l => l.action === 'push_availability'));
+    });
+
+    await test('webhook de OTA crea una reserva confirmada de canal', async () => {
+      const ci = futureDay(80), co = futureDay(82);
+      const res = await fetch(`${BASE}/api/public/channels/booking/webhook?propertyId=${propertyId}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ externalCode: 'DBL-STD', checkIn: ci, checkOut: co, adults: 2, guestName: 'John OTA', ref: 'BK-99887', total: 500000 }),
+      });
+      assert.equal(res.status, 201);
+      const data = await res.json();
+      assert.match(data.code, /ATR-\d{4}/);
+      assert.equal(data.overbooking, false);
+      const list = await api(`/api/reservations?propertyId=${propertyId}&status=confirmed`);
+      const ota = list.data.find(r => r.code === data.code);
+      assert.ok(ota && ota.channel === 'ota', 'la reserva quedó como canal OTA confirmada');
+    });
+
+    await test('webhook con código externo sin mapeo se rechaza', async () => {
+      const res = await fetch(`${BASE}/api/public/channels/booking/webhook?propertyId=${propertyId}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ externalCode: 'NO-EXISTE', checkIn: futureDay(80), checkOut: futureDay(82), guestName: 'X' }),
+      });
+      assert.equal(res.status, 400);
+    });
+
+    await test('detección de overbooking cuando no hay disponibilidad', async () => {
+      // Saturar un tipo para una fecha, luego recibir una reserva OTA de ese tipo
+      const ci = futureDay(35), co = futureDay(36);
+      const av = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 2 } });
+      const opt = av.data.find(o => o.roomTypeId === otaRoomTypeId);
+      for (let k = 0; k < opt.availableRooms; k++) {
+        const r = await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 2, roomTypeId: otaRoomTypeId, guest: { fullName: `Full ${k}` }, withPaymentLink: false } });
+        if (r.data.reservation) await api(`/api/reservations/${r.data.reservation.id}/confirm`, { method: 'POST' });
+      }
+      const res = await fetch(`${BASE}/api/public/channels/booking/webhook?propertyId=${propertyId}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ externalCode: 'DBL-STD', checkIn: ci, checkOut: co, adults: 2, guestName: 'Overbook OTA', ref: 'BK-OVER' }),
+      });
+      const data = await res.json();
+      assert.equal(res.status, 201);
+      assert.equal(data.overbooking, true, 'debe marcar riesgo de overbooking');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

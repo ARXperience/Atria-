@@ -91,6 +91,19 @@ publicRouter.post('/hotel/:propertyId/book', async (req, res) => {
   }
 });
 
+// ---- Webhook de OTA (channel manager §35): recibe reservas externas ----
+publicRouter.post('/channels/:channelCode/webhook', async (req, res) => {
+  const { propertyId } = req.query;
+  if (!propertyId) return res.status(400).json({ error: 'propertyId requerido' });
+  try {
+    const { receiveChannelReservation } = await import('../services/channels.js');
+    const result = await receiveChannelReservation({ propertyId, channelCode: req.params.channelCode, payload: req.body || {} });
+    res.status(201).json({ received: true, code: result.reservation.code, overbooking: result.overbooking });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---- Webhook de pasarelas (mock, wompi, mercadopago, bold, stripe) ----
 publicRouter.post('/webhooks/payments/:provider', async (req, res) => {
   try {

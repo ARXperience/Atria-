@@ -285,6 +285,7 @@ model Reservation {
   total       Float
   depositRequired Float @default(0)
   channel     String   @default("direct") // direct | whatsapp | web | walkin | ota
+  channelRef  String?  // localizador externo (OTA)
   status      String   @default("tentative") // tentative | confirmed | checked_in | checked_out | cancelled | no_show | expired
   holdExpiresAt DateTime?
   notes       String?
@@ -518,6 +519,50 @@ model PurchaseOrder {
   createdAt    DateTime @default(now())
 
   @@index([propertyId, status])
+}
+
+// ===================== Atria — Channel manager (§35) =====================
+model Channel {
+  id            String   @id @default(cuid())
+  propertyId    String
+  name          String   // Booking.com, Expedia, Airbnb, Despegar
+  code          String   // booking | expedia | airbnb | despegar
+  enabled       Boolean  @default(false)
+  commissionPct Float    @default(0.15)
+  status        String   @default("disconnected") // disconnected | connected | error
+  lastSyncAt    DateTime?
+  createdAt     DateTime @default(now())
+  mappings      ChannelMapping[]
+  syncLogs      ChannelSyncLog[]
+
+  @@unique([propertyId, code])
+}
+
+model ChannelMapping {
+  id           String   @id @default(cuid())
+  propertyId   String
+  channelId    String
+  channel      Channel  @relation(fields: [channelId], references: [id])
+  roomTypeId   String
+  externalCode String
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  @@index([propertyId])
+  @@index([channelId])
+}
+
+model ChannelSyncLog {
+  id         String   @id @default(cuid())
+  propertyId String
+  channelId  String
+  channel    Channel  @relation(fields: [channelId], references: [id])
+  action     String   // push_availability | push_rates | reservation_received | error | overbooking
+  status     String   @default("ok") // ok | error | warning
+  detail     String?
+  createdAt  DateTime @default(now())
+
+  @@index([channelId, createdAt])
 }
 
 // ===================== Atria Revenue (§34) =====================

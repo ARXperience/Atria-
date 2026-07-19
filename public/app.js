@@ -177,6 +177,7 @@
     ['sgsst', '🦺 SG-SST'],
     ['sep', 'Distribución'],
     ['revenue', '📈 Revenue'],
+    ['channels', '🌍 Canales (OTAs)'],
     ['sep', 'Abastecimiento'],
     ['inventory', '📦 Inventario'],
     ['pos', '🍽️ Restaurante (POS)'],
@@ -1073,6 +1074,55 @@
       </table>${employees.length ? '' : '<p class="muted">Sin empleados registrados.</p>'}</div>`;
   }
 
+  async function viewChannels() {
+    const [ov, channels, catalog, mappings, logs, types] = await Promise.all([
+      get(`/channels/overview?${pid()}`),
+      get(`/channels?${pid()}`),
+      get('/channels/catalog'),
+      get(`/channels/mappings?${pid()}`),
+      get(`/channels/logs?${pid()}`),
+      get(`/admin/room-types?${pid()}`).catch(() => []),
+    ]);
+    const configured = channels.map(c => c.code);
+    window._chAdd = async code => { try { await api('/channels', { method: 'POST', body: { propertyId: state.propertyId, code } }); toast('Canal agregado'); render(); } catch (e) { toast(e.message, true); } };
+    window._chToggle = async (id, enabled) => { try { await api(`/channels/${id}`, { method: 'PATCH', body: { enabled } }); toast(enabled ? 'Canal activado' : 'Canal desactivado'); render(); } catch (e) { toast(e.message, true); } };
+    window._chSync = async id => { try { await api(`/channels/${id}/sync`, { method: 'POST' }); toast('Sincronizado'); render(); } catch (e) { toast(e.message, true); } };
+    window._chMap = async () => { try { await api('/channels/mappings', { method: 'POST', body: { propertyId: state.propertyId, channelId: $('#mpChan').value, roomTypeId: $('#mpType').value, externalCode: $('#mpCode').value } }); toast('Mapeo creado'); render(); } catch (e) { toast(e.message, true); } };
+    const chName = id => (channels.find(c => c.id === id) || {}).name || '';
+    const tName = id => (types.find(t => t.id === id) || {}).name || '';
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Canales</div><div class="value">${ov.channels}</div></div>
+        <div class="kpi"><div class="label">Conectados</div><div class="value" style="color:var(--green)">${ov.connected}</div></div>
+        <div class="kpi"><div class="label">Reservas OTA</div><div class="value">${ov.otaReservations}</div></div>
+        <div class="kpi"><div class="label">Overbooking (7d)</div><div class="value" style="color:${ov.recentOverbooking ? 'var(--red)' : 'inherit'}">${ov.recentOverbooking}</div></div>
+      </div>
+      <div class="card mt"><h3>Canales</h3>
+        <div class="row" style="margin-bottom:10px">${catalog.filter(k => !configured.includes(k.code)).map(k => `<button class="btn small secondary fit" onclick="_chAdd('${k.code}')">+ ${esc(k.name)}</button>`).join('') || '<span class="muted">Todos los canales del catálogo están configurados.</span>'}</div>
+        <table><tr><th>Canal</th><th>Comisión</th><th>Mapeos</th><th>Estado</th><th>Última sync</th><th></th></tr>
+        ${channels.map(c => `<tr><td><b>${esc(c.name)}</b></td><td>${Math.round(c.commissionPct * 100)}%</td><td>${c._count.mappings}</td>
+          <td>${c.enabled ? badge(c.status === 'connected' ? 'conectado' : 'activo', 'green') : badge('inactivo', 'gray')}</td>
+          <td class="muted" style="font-size:12px">${c.lastSyncAt ? dt(c.lastSyncAt) : '—'}</td>
+          <td>${c.enabled ? `<button class="btn small" onclick="_chSync('${c.id}')">Sincronizar</button> <button class="btn small secondary" onclick="_chToggle('${c.id}',false)">Desactivar</button>` : `<button class="btn small secondary" onclick="_chToggle('${c.id}',true)">Activar</button>`}</td>
+        </tr>`).join('')}</table>
+        ${channels.length ? '' : '<p class="muted">Agrega un canal del catálogo para empezar.</p>'}
+      </div>
+      <div class="grid cols-2">
+        <div class="card"><h3>Mapeo de habitaciones</h3>
+          <p class="muted" style="font-size:12.5px">Relaciona cada tipo interno con el código del canal para sincronizar bien.</p>
+          <div class="row"><div><label>Canal</label><select id="mpChan">${channels.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div><label>Tipo interno</label><select id="mpType">${types.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></div></div>
+          <div class="row"><div><label>Código externo (OTA)</label><input id="mpCode" placeholder="DBL-STD"></div><button class="btn fit" onclick="_chMap()">Mapear</button></div>
+          <table class="mt"><tr><th>Canal</th><th>Tipo</th><th>Código</th></tr>${mappings.map(m => `<tr><td>${esc(chName(m.channelId))}</td><td>${esc(tName(m.roomTypeId))}</td><td>${esc(m.externalCode)}</td></tr>`).join('')}</table>
+          ${mappings.length ? '' : '<p class="muted">Sin mapeos.</p>'}
+        </div>
+        <div class="card"><h3>Registro de sincronización</h3>
+          <table><tr><th>Fecha</th><th>Acción</th><th>Estado</th><th>Detalle</th></tr>
+          ${logs.map(l => `<tr><td>${dt(l.createdAt)}</td><td>${esc(l.action)}</td><td>${l.status === 'ok' ? badge('ok', 'green') : l.status === 'warning' ? badge('aviso', 'yellow') : badge('error', 'red')}</td><td class="muted" style="font-size:12px">${esc(l.detail || '')}</td></tr>`).join('')}</table>
+          ${logs.length ? '' : '<p class="muted">Sin actividad.</p>'}
+        </div>
+      </div>`;
+  }
+
   async function viewRevenue() {
     const [fc, recs, rules, types] = await Promise.all([
       get(`/revenue/forecast?${pid()}&days=14`),
@@ -1764,6 +1814,7 @@
     inventory: ['Inventario, proveedores y compras', viewInventory],
     pos: ['Restaurante — POS y comandas', viewPos],
     revenue: ['Revenue — forecast y tarifas', viewRevenue],
+    channels: ['Channel manager — OTAs', viewChannels],
     approvals: ['Aprobaciones humanas', viewApprovals],
     compliance: ['Cumplimiento (RNT · TRA · SIRE)', viewCompliance],
     documents: ['Centro documental', viewDocuments],
