@@ -83,7 +83,8 @@ publicRouter.post('/webchat/:propertyId/messages', async (req, res) => {
   const property = await prisma.property.findUnique({ where: { id: req.params.propertyId } });
   if (!property) return res.status(404).json({ error: 'Sede no encontrada' });
   const conversation = await upsertConversation({
-    propertyId: property.id, channel: 'webchat', contactId: String(sessionId), contactName: name || null,
+    propertyId: property.id, channel: 'webchat', contactId: String(sessionId),
+    contactName: name || null, contactPhone: req.body?.phone || null,
   });
   await saveInbound(conversation.id, String(text));
   const fresh = await prisma.conversation.findUnique({ where: { id: conversation.id } });

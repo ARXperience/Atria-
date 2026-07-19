@@ -251,6 +251,8 @@ model Guest {
   email       String?
   city        String?
   notes       String?
+  language    String?  @default("es")
+  memory      String?  // JSON: preferencias, etiquetas, resumen y contexto del huésped (IA-5)
   marketingConsent Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -636,6 +638,7 @@ model Conversation {
   aiEnabled   Boolean  @default(true)   // false = tomada por humano
   assignedTo  String?
   lastMessageAt DateTime @default(now())
+  summary     String?  // resumen de la conversación para escalamiento a humano (IA-5)
   context     String?  // JSON: estado conversacional del bot (fechas, cotización, etc.)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

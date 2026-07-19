@@ -628,6 +628,47 @@ async function main() {
       assert.match(cash, /copiloto|ayudarte|habitaciones/i);
     });
 
+    // ===== IA-5: memoria por huésped y conversación, escalamiento con resumen =====
+    await test('huésped recurrente recibe saludo personalizado', async () => {
+      // 'Juan Pérez Test' (tel 573001112233) ya tiene una reserva confirmada antes.
+      const sid = 'returning-guest';
+      const { data } = await api(`/api/public/webchat/${propertyId}/messages`, {
+        method: 'POST', body: { sessionId: sid, text: 'Hola', phone: '573001112233' },
+      });
+      assert.match(data.replies.join(' '), /de nuevo|otra vez/i, 'debe reconocer al huésped recurrente');
+    });
+
+    await test('memoria del huésped se guarda al reservar por chat', async () => {
+      const g = await api(`/api/crm/guests?propertyId=${propertyId}&q=María`);
+      const maria = g.data.find(x => x.fullName.includes('María'));
+      assert.ok(maria, 'María (creada por el bot) debe existir');
+      const mem = await api(`/api/crm/guests/${maria.id}/memory`);
+      assert.equal(mem.status, 200);
+      assert.ok(mem.data.stays >= 1, 'debe registrar al menos una estadía/reserva');
+      assert.ok(mem.data.memory.lastTravel, 'la memoria debe recordar su última intención de viaje');
+    });
+
+    await test('escalamiento genera resumen para la persona que recibe', async () => {
+      const sid = 'summary-test';
+      const ci = futureDay(50), co = futureDay(52);
+      await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: `Quiero reservar del ${ci} al ${co} para 2 adultos` } });
+      await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: '1' } });
+      await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: 'quiero un reembolso, esto es un desastre' } });
+      await settle();
+      const convos = await api(`/api/inbox/conversations?propertyId=${propertyId}`);
+      const convo = convos.data.find(c => c.channel === 'webchat' && !c.aiEnabled && c.lastMessage);
+      // Buscar la conversación de summary-test por sus mensajes
+      const list = await api(`/api/inbox/conversations?propertyId=${propertyId}`);
+      let target = null;
+      for (const c of list.data) {
+        const det = await api(`/api/inbox/conversations/${c.id}/messages`);
+        if (det.data.messages.some(m => m.body.includes('reembolso')) && det.data.conversation.summary) { target = det.data.conversation; break; }
+      }
+      assert.ok(target, 'debe existir una conversación escalada con resumen');
+      assert.match(target.summary, /escalamiento|Fechas de interés|opciones|cotiz/i, 'el resumen debe traer contexto útil');
+      assert.equal(target.aiEnabled, false, 'la IA queda en pausa tras escalar');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

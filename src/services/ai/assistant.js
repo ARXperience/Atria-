@@ -15,6 +15,7 @@ import { getAgentProfile, buildSystemPrompt } from './agentProfile.js';
 import { knowledgeSnapshot } from '../knowledge.js';
 import { searchKnowledge, looksLikeQuestion } from './retrieval.js';
 import { buildTools, toolDefsForLLM } from './tools.js';
+import { guestRecall, summarizeConversation, saveConversationSummary, updateGuestMemory } from './memory.js';
 import { fmtCOP, dayStr, parseDay, nightsBetween } from '../../lib/util.js';
 import { audit } from '../../lib/audit.js';
 import { logger } from '../../lib/logger.js';
@@ -66,9 +67,11 @@ export async function assistantReply({ propertyId, conversation, text }) {
   const getSnapshot = async () => (snapshot ||= await knowledgeSnapshot(propertyId, { visibility: profile.knowledgeScope }));
 
   try {
-    // 1) Escalamiento a humano (sección 13: la IA no maneja quejas/reembolsos)
+    // 1) Escalamiento a humano con resumen (§13 + §55.8: la persona recibe contexto)
     if (ESCALATION.test(text)) {
-      await setHumanTakeover(conversation.id, { enabled: true, reason: `Mensaje del huésped: "${text.slice(0, 200)}"` });
+      const summary = await summarizeConversation(conversation.id, { reason: text });
+      await saveConversationSummary(conversation.id, summary);
+      await setHumanTakeover(conversation.id, { enabled: true, reason: summary });
       say('Entiendo, ya mismo te comunico con una persona de nuestro equipo. En un momento te atienden. 🙏');
       await persist(conversation.id, ctx, 'escalated');
       return finish(replies, conversation, text, 'escalation');
@@ -209,8 +212,14 @@ export async function assistantReply({ propertyId, conversation, text }) {
       return finish(replies, conversation, text, 'ask_dates');
     }
 
-    // 10) Saludo / fallback (con la persona configurada del hotel)
+    // 10) Saludo / fallback (persona del hotel + memoria de huésped recurrente)
     if (GREETING.test(text)) {
+      const recall = await guestRecall({ propertyId, phone: conversation.contactPhone });
+      if (recall?.isReturning) {
+        const first = recall.guest.fullName.split(' ')[0];
+        say(`¡Hola de nuevo, ${first}! 👋 Qué gusto tenerte otra vez con nosotros en *${property.name}*. ¿Te ayudo con una nueva reserva o con algo de tu estadía?`);
+        return finish(replies, conversation, text, 'greeting_returning');
+      }
       const name = profile.displayName || 'Atria';
       say(profile.greeting
         || `¡Hola! 👋 Bienvenido(a) a *${property.name}*. Soy ${name}, tu asistente virtual. Puedo ayudarte a consultar disponibilidad, cotizar y reservar. ¿Para qué fechas te gustaría hospedarte?`);
@@ -297,6 +306,12 @@ async function createBookingAndLink({ propertyId, conversation, ctx, property, s
     createdBy: 'ai',
   });
   await audit({ propertyId, actor: 'ai', action: 'ai.action_executed', entity: 'Reservation', entityId: reservation.id, after: { code: reservation.code, via: conversation.channel } });
+
+  // Memoria del huésped (IA-5): recuerda su última intención de viaje.
+  await updateGuestMemory(reservation.guestId, {
+    lastTravel: { checkIn: ctx.checkIn, checkOut: ctx.checkOut, adults: ctx.adults || 2 },
+    lastChannel: conversation.channel,
+  }).catch(() => {});
 
   ctx.state = 'awaiting_payment';
   ctx.reservationId = reservation.id;

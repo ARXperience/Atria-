@@ -481,6 +481,7 @@
               : `${badge('Atiende: ' + (c.assignedTo || 'humano'), 'yellow')} <button class="btn small secondary" onclick="_takeover(true)">🤖 Devolver a la IA</button>`}
           </div>
         </div>
+        ${c.summary ? `<div style="padding:10px 16px;background:var(--accent-soft);border-bottom:1px solid var(--border-soft);font-size:12.5px;color:var(--text-dim)"><b style="color:var(--accent-hi)">🧠 Resumen IA:</b> ${esc(c.summary)}</div>` : ''}
         <div class="chat-body" id="chatBody">
           ${messages.map(m => `<div class="msg ${m.direction}">${esc(m.body)}<div class="meta">${m.direction === 'out' ? esc(m.sender === 'ai' ? 'Atria IA' : m.sender) + ' · ' : ''}${dt(m.createdAt)}</div></div>`).join('')}
         </div>

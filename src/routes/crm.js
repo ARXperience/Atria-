@@ -2,10 +2,30 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
+import { guestRecall, getGuestMemory } from '../services/ai/memory.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, parseDay } from '../lib/util.js';
 
 export const crmRouter = Router();
+
+// Memoria del huésped e historial (IA-5)
+crmRouter.get('/guests/:id/memory', requirePermission('guests.view'), async (req, res) => {
+  const guest = await prisma.guest.findUnique({ where: { id: req.params.id } });
+  if (!guest || !propertyScope(req, guest.propertyId)) return res.status(404).json({ error: 'Huésped no encontrado' });
+  const memory = await getGuestMemory(guest.id); // se lee directo del huésped (no depende del teléfono)
+  const reservations = await prisma.reservation.findMany({
+    where: { guestId: guest.id }, orderBy: { checkIn: 'desc' }, take: 10,
+    select: { code: true, status: true, checkIn: true, checkOut: true, total: true },
+  });
+  const stays = reservations.filter(r => ['confirmed', 'checked_in', 'checked_out'].includes(r.status)).length;
+  res.json({
+    guest: { id: guest.id, fullName: guest.fullName, phone: guest.phone, language: guest.language },
+    memory,
+    isReturning: stays > 0,
+    stays,
+    reservations,
+  });
+});
 
 crmRouter.get('/leads', requirePermission('crm.view'), async (req, res) => {
   const { propertyId, stage } = req.query;
