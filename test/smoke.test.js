@@ -984,6 +984,41 @@ async function main() {
       assert.ok(list.data.some(r => r.code === webBook.code && r.channel === 'web'), 'la reserva web quedó confirmada');
     });
 
+    // ===== Ola 4: Revenue management (§34) =====
+    await test('forecast devuelve ocupación, ADR y RevPAR por día', async () => {
+      const { status, data } = await api(`/api/revenue/forecast?propertyId=${propertyId}&days=10`);
+      assert.equal(status, 200);
+      assert.equal(data.length, 10);
+      assert.ok(typeof data[0].occupancyPct === 'number' && data[0].sellable >= 1);
+    });
+
+    await test('recomendación de alza cuando la ocupación es alta', async () => {
+      // Llenar una fecha futura dentro del horizonte de forecast (≤ 60 días)
+      const ci = futureDay(25), co = futureDay(26);
+      const av = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 2 } });
+      let made = 0;
+      for (const opt of av.data) {
+        for (let k = 0; k < opt.availableRooms && made < 9; k++) {
+          const r = await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 2, roomTypeId: opt.roomTypeId, guest: { fullName: `Ocup ${made}` }, withPaymentLink: false } });
+          if (r.data.reservation) { await api(`/api/reservations/${r.data.reservation.id}/confirm`, { method: 'POST' }); made++; }
+        }
+      }
+      const recs = await api(`/api/revenue/recommendations?propertyId=${propertyId}&days=30`);
+      const high = recs.data.filter(r => r.date === ci && r.changePct > 0);
+      assert.ok(high.length >= 1, 'con alta ocupación debe recomendar subir la tarifa');
+    });
+
+    await test('crear regla de precio y aplicar un cambio de tarifa', async () => {
+      const rule = await api('/api/revenue/rules', { method: 'POST', body: { propertyId, name: 'Última hora', daysAheadLte: 3, adjustPct: -0.15 } });
+      assert.equal(rule.status, 201);
+      const types = await api(`/api/admin/room-types?propertyId=${propertyId}`);
+      const plan = types.data[0].ratePlans[0];
+      const before = plan.price;
+      const ap = await api('/api/revenue/apply', { method: 'POST', body: { propertyId, ratePlanId: plan.id, newPrice: before + 50000 } });
+      assert.equal(ap.status, 200);
+      assert.equal(ap.data.price, before + 50000);
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

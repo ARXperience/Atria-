@@ -520,6 +520,22 @@ model PurchaseOrder {
   @@index([propertyId, status])
 }
 
+// ===================== Atria Revenue (§34) =====================
+model PricingRule {
+  id            String   @id @default(cuid())
+  propertyId    String
+  name          String
+  roomTypeId    String?  // null = aplica a todos
+  occupancyGte  Float?   // si ocupación >= X → aplicar ajuste
+  occupancyLte  Float?   // si ocupación <= X → aplicar ajuste
+  daysAheadLte  Int?     // solo si faltan <= N días (last minute)
+  adjustPct     Float    // +0.15 sube 15%, -0.10 baja 10%
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  @@index([propertyId, active])
+}
+
 // ===================== Web / CMS público (§9) =====================
 model SiteSettings {
   id           String   @id @default(cuid())

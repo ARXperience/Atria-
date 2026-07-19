@@ -175,6 +175,8 @@
     ['shifts', '📆 Turnos'],
     ['payroll', '💰 Nómina'],
     ['sgsst', '🦺 SG-SST'],
+    ['sep', 'Distribución'],
+    ['revenue', '📈 Revenue'],
     ['sep', 'Abastecimiento'],
     ['inventory', '📦 Inventario'],
     ['pos', '🍽️ Restaurante (POS)'],
@@ -1071,6 +1073,57 @@
       </table>${employees.length ? '' : '<p class="muted">Sin empleados registrados.</p>'}</div>`;
   }
 
+  async function viewRevenue() {
+    const [fc, recs, rules, types] = await Promise.all([
+      get(`/revenue/forecast?${pid()}&days=14`),
+      get(`/revenue/recommendations?${pid()}&days=14`),
+      get(`/revenue/rules?${pid()}`),
+      get(`/admin/room-types?${pid()}`).catch(() => []),
+    ]);
+    window._applyRate = async (ratePlanId, price) => {
+      try { await api('/revenue/apply', { method: 'POST', body: { propertyId: state.propertyId, ratePlanId, newPrice: price } }); toast('Tarifa actualizada'); render(); }
+      catch (e) { toast(e.message, true); }
+    };
+    window._addRule = async () => {
+      try {
+        await api('/revenue/rules', { method: 'POST', body: { propertyId: state.propertyId, name: $('#ruName').value, occupancyGte: $('#ruOccGte').value || null, occupancyLte: $('#ruOccLte').value || null, daysAheadLte: $('#ruDays').value || null, adjustPct: +$('#ruPct').value / 100 } });
+        toast('Regla creada'); render();
+      } catch (e) { toast(e.message, true); }
+    };
+    const maxRev = Math.max(1, ...fc.map(d => d.revpar));
+    return `
+      <div class="card"><h3>Forecast — próximos 14 días</h3>
+        <div style="display:flex;gap:4px;align-items:flex-end;height:120px;margin:10px 0 4px">
+          ${fc.map(d => `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:3px" title="${d.date}: ${d.occupancyPct}% · RevPAR ${cop(d.revpar)}">
+            <div style="width:70%;background:linear-gradient(180deg,var(--accent),var(--accent-lo));border-radius:3px 3px 0 0;height:${Math.max(3, Math.round(d.revpar / maxRev * 100))}%"></div>
+            <div style="font-size:9px;color:var(--muted)">${d.date.slice(8)}</div></div>`).join('')}
+        </div>
+        <table class="mt"><tr><th>Fecha</th><th>Ocupación</th><th>Vendidas</th><th>ADR</th><th>RevPAR</th></tr>
+        ${fc.map(d => `<tr><td>${d.date}</td><td>${d.occupancyPct >= 80 ? badge(d.occupancyPct + '%', 'green') : d.occupancyPct <= 40 ? badge(d.occupancyPct + '%', 'yellow') : d.occupancyPct + '%'}</td><td>${d.roomsSold}/${d.sellable}</td><td>${cop(d.adr)}</td><td>${cop(d.revpar)}</td></tr>`).join('')}</table>
+      </div>
+      <div class="card"><h3>Recomendaciones de tarifa (${recs.length})</h3>
+        ${recs.length ? `<table><tr><th>Fecha</th><th>Habitación</th><th>Ocup.</th><th>Actual</th><th>Sugerida</th><th>Motivo</th><th></th></tr>
+        ${recs.slice(0, 25).map(r => `<tr><td>${r.date}</td><td>${esc(r.roomType)}</td><td>${r.occupancyPct}%</td><td>${cop(r.currentPrice)}</td>
+          <td>${r.changePct > 0 ? badge('▲ ' + cop(r.suggestedPrice), 'green') : badge('▼ ' + cop(r.suggestedPrice), 'yellow')}</td>
+          <td class="muted" style="font-size:12px">${esc(r.reason)}</td>
+          <td><button class="btn small" onclick="_applyRate('${r.ratePlanId}',${r.suggestedPrice})">Aplicar</button></td></tr>`).join('')}</table>`
+          : '<p class="muted">Sin recomendaciones — la ocupación está en rango normal.</p>'}
+      </div>
+      <div class="card"><h3>Reglas dinámicas de precio</h3>
+        <div class="row">
+          <div><label>Nombre</label><input id="ruName" placeholder="Alta demanda"></div>
+          <div><label>Ocup. ≥ (0-1)</label><input id="ruOccGte" type="number" step="0.1" placeholder="0.8"></div>
+          <div><label>Ocup. ≤ (0-1)</label><input id="ruOccLte" type="number" step="0.1" placeholder=""></div>
+          <div><label>Días antes ≤</label><input id="ruDays" type="number" placeholder=""></div>
+          <div><label>Ajuste %</label><input id="ruPct" type="number" placeholder="15"></div>
+          <button class="btn fit" onclick="_addRule()">Crear</button>
+        </div>
+        <table class="mt"><tr><th>Regla</th><th>Condición</th><th>Ajuste</th></tr>
+        ${rules.map(r => `<tr><td>${esc(r.name)}</td><td class="muted" style="font-size:12px">${r.occupancyGte != null ? 'ocup ≥ ' + r.occupancyGte : ''}${r.occupancyLte != null ? ' ocup ≤ ' + r.occupancyLte : ''}${r.daysAheadLte != null ? ' · ≤' + r.daysAheadLte + 'd' : ''}</td><td>${r.adjustPct > 0 ? badge('+' + Math.round(r.adjustPct * 100) + '%', 'green') : badge(Math.round(r.adjustPct * 100) + '%', 'yellow')}</td></tr>`).join('')}</table>
+        ${rules.length ? '' : '<p class="muted">Sin reglas — se usan umbrales por defecto (≥80% sube, ≤40% baja).</p>'}
+      </div>`;
+  }
+
   async function viewPos() {
     const [menu, orders, inhouse, products] = await Promise.all([
       get(`/pos/menu?${pid()}`),
@@ -1710,6 +1763,7 @@
     sgsst: ['SG-SST — Seguridad y Salud en el Trabajo', viewSgsst],
     inventory: ['Inventario, proveedores y compras', viewInventory],
     pos: ['Restaurante — POS y comandas', viewPos],
+    revenue: ['Revenue — forecast y tarifas', viewRevenue],
     approvals: ['Aprobaciones humanas', viewApprovals],
     compliance: ['Cumplimiento (RNT · TRA · SIRE)', viewCompliance],
     documents: ['Centro documental', viewDocuments],
