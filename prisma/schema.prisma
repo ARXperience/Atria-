@@ -170,11 +170,36 @@ model RoomType {
   baseRate    Float    // tarifa base por noche (COP)
   description String?
   amenities   String?  // CSV
+  // Contenido rico para web y conocimiento del agente (IA-1)
+  longDescription String?
+  bedConfig   String?  // p.ej. "1 cama king + 1 sofá cama"
+  sizeM2      Float?
+  view        String?  // ciudad, montaña, interior...
+  features    String?  // CSV: wifi, aire, minibar, jacuzzi, balcón...
   active      Boolean  @default(true)
   rooms       Room[]
   ratePlans   RatePlan[]
 
   @@unique([propertyId, code])
+}
+
+// Base de conocimiento del hotel (§55.5): lo que el agente puede consultar.
+// visibility=public lo usa el agente externo; internal, los asistentes internos.
+model KnowledgeItem {
+  id         String   @id @default(cuid())
+  propertyId String
+  category   String   // faq | service | location | policy | amenity | attraction | general
+  title      String
+  content    String
+  visibility String   @default("public") // public | internal
+  tags       String?  // CSV para recuperación
+  active     Boolean  @default(true)
+  validUntil DateTime?
+  updatedBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([propertyId, visibility, active])
 }
 
 model Room {
@@ -399,6 +424,31 @@ model HotelPolicy {
   updatedAt  DateTime @updatedAt
 
   @@index([propertyId, type])
+}
+
+// ===================== Atria IA — Agentes (§41, §54, §55.5) =====================
+
+// Perfil configurable del agente por sede y por ámbito (la "mascota" del hotel).
+// scope=guest → agente externo de huéspedes; scope=<AREA> → asistente interno.
+model AgentProfile {
+  id            String   @id @default(cuid())
+  propertyId    String
+  scope         String   @default("guest") // guest | reception | housekeeping | maintenance | sales | finance | payroll | manager
+  displayName   String   // nombre de la mascota, p.ej. "Lucía de Hotel Atria"
+  persona       String?  // instrucciones de personalidad/tono
+  tone          String   @default("cálido y profesional")
+  languages     String   @default("es")
+  emojis        Boolean  @default(true)
+  greeting      String?
+  domainOnly    Boolean  @default(true) // solo habla de temas del hotel
+  llmEnabled    Boolean  @default(true) // usa Claude si hay API key; si no, motor determinístico
+  enabledTools  String   @default("*")  // CSV de herramientas permitidas o "*"
+  knowledgeScope String  @default("public") // public | internal
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([propertyId, scope])
 }
 
 // ===================== Motor de reglas legales (§39) =====================

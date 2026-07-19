@@ -32,6 +32,42 @@ export async function llmComplete({ system, messages, maxTokens = 600 }) {
   }
 }
 
+// Bucle de conversación con herramientas (function-calling) — IA-3/§55.6.
+// Ejecuta el ciclo: LLM decide → llama herramienta → se ejecuta → LLM responde.
+// Devuelve el texto final o null si no hay LLM disponible o falla.
+export async function llmToolLoop({ system, messages, tools, toolDefs, maxTokens = 700, maxSteps = 5 }) {
+  if (!llmAvailable()) return null;
+  const convo = [...messages];
+  try {
+    for (let step = 0; step < maxSteps; step++) {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': config.anthropicApiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: config.anthropicModel, max_tokens: maxTokens, system, tools: toolDefs, messages: convo }),
+      });
+      if (!res.ok) { logger.warn({ status: res.status }, 'anthropic tool loop error'); return null; }
+      const data = await res.json();
+      const toolUses = (data.content || []).filter(b => b.type === 'tool_use');
+      if (!toolUses.length) {
+        return (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n') || null;
+      }
+      convo.push({ role: 'assistant', content: data.content });
+      const results = [];
+      for (const tu of toolUses) {
+        let out;
+        try { out = await tools[tu.name].run(tu.input || {}); }
+        catch (err) { out = { error: err.message }; }
+        results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(out) });
+      }
+      convo.push({ role: 'user', content: results });
+    }
+    return null;
+  } catch (err) {
+    logger.warn({ err }, 'anthropic tool loop unreachable');
+    return null;
+  }
+}
+
 // Extrae parámetros de reserva desde texto libre usando el LLM (fallback: null)
 export async function llmExtractBooking(text) {
   const out = await llmComplete({

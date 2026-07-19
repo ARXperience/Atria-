@@ -10,6 +10,29 @@ import { logger } from '../lib/logger.js';
 
 export const publicRouter = Router();
 
+// ---- Media pública: imágenes de habitaciones (solo docType=image) ----
+publicRouter.get('/media/:documentId', async (req, res) => {
+  const doc = await prisma.document.findUnique({ where: { id: req.params.documentId } });
+  if (!doc || doc.status !== 'active' || doc.docType !== 'image') return res.status(404).json({ error: 'Imagen no encontrada' });
+  try {
+    const { readDocumentFile } = await import('../services/documents.js');
+    const buffer = await readDocumentFile(doc);
+    res.setHeader('Content-Type', doc.mimeType || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.end(buffer);
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+// ---- Contenido público de habitaciones (web / motor de reservas) ----
+publicRouter.get('/hotel/:propertyId/rooms', async (req, res) => {
+  const property = await prisma.property.findUnique({ where: { id: req.params.propertyId } });
+  if (!property) return res.status(404).json({ error: 'Sede no encontrada' });
+  const { roomsContent } = await import('../services/knowledge.js');
+  res.json({ hotel: { name: property.name, city: property.city }, rooms: await roomsContent(property.id) });
+});
+
 // ---- Webhook de pasarelas (mock, wompi, mercadopago, bold, stripe) ----
 publicRouter.post('/webhooks/payments/:provider', async (req, res) => {
   try {

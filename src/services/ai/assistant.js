@@ -5,12 +5,16 @@
 // extracción de entidades en mensajes ambiguos.
 import { prisma } from '../../db.js';
 import { extractDates, extractGuests } from './dates.js';
-import { llmAvailable, llmExtractBooking, llmComplete } from './claude.js';
+import { llmAvailable, llmExtractBooking, llmComplete, llmToolLoop } from './claude.js';
 import { findAvailability } from '../availability.js';
 import { buildQuote } from '../quote.js';
 import { createTentativeReservation } from '../reservations.js';
 import { createPaymentLink } from '../payments.js';
 import { getContext, setContext, setHumanTakeover } from '../inbox.js';
+import { getAgentProfile, buildSystemPrompt } from './agentProfile.js';
+import { knowledgeSnapshot } from '../knowledge.js';
+import { searchKnowledge, looksLikeQuestion } from './retrieval.js';
+import { buildTools, toolDefsForLLM } from './tools.js';
 import { fmtCOP, dayStr, parseDay, nightsBetween } from '../../lib/util.js';
 import { audit } from '../../lib/audit.js';
 import { logger } from '../../lib/logger.js';
@@ -53,8 +57,13 @@ async function propertyInfo(propertyId) {
 export async function assistantReply({ propertyId, conversation, text }) {
   const ctx = await getContext(conversation);
   const property = await propertyInfo(propertyId);
+  const profile = await getAgentProfile(propertyId, 'guest');
   const replies = [];
   const say = r => replies.push(r);
+
+  // Conocimiento del hotel (habitaciones + FAQs + políticas) para este agente.
+  let snapshot = null;
+  const getSnapshot = async () => (snapshot ||= await knowledgeSnapshot(propertyId, { visibility: profile.knowledgeScope }));
 
   try {
     // 1) Escalamiento a humano (sección 13: la IA no maneja quejas/reembolsos)
@@ -63,6 +72,13 @@ export async function assistantReply({ propertyId, conversation, text }) {
       say('Entiendo, ya mismo te comunico con una persona de nuestro equipo. En un momento te atienden. 🙏');
       await persist(conversation.id, ctx, 'escalated');
       return finish(replies, conversation, text, 'escalation');
+    }
+
+    // 1b) Si el agente tiene LLM y hay API key: conversación natural con
+    // control de herramientas (IA-3/§55.6). Si falla, cae al motor determinístico.
+    if (profile.llmEnabled && llmAvailable()) {
+      const handled = await runLlmAgent({ propertyId, profile, conversation, text, getSnapshot, say });
+      if (handled) return finish(replies, conversation, text, 'llm_agent');
     }
 
     // 2) Captura de nombre pendiente para crear la reserva
@@ -175,6 +191,16 @@ export async function assistantReply({ propertyId, conversation, text }) {
       return finish(replies, conversation, text, 'faq_checkin');
     }
 
+    // 8b) Respuesta con conocimiento del hotel (habitaciones, servicios, FAQs).
+    // Solo para preguntas informativas, sin secuestrar el flujo de reserva.
+    if (looksLikeQuestion(text)) {
+      const hit = searchKnowledge(await getSnapshot(), text);
+      if (hit) {
+        say(`${hit.answer}${profile.scope === 'guest' ? '\n\n¿Te ayudo con una reserva o algo más? 😊' : ''}`);
+        return finish(replies, conversation, text, 'knowledge_answer');
+      }
+    }
+
     // 9) Intención de reserva sin fechas → pedirlas
     if (BOOKING_HINT.test(text)) {
       ctx.state = 'need_dates';
@@ -183,25 +209,26 @@ export async function assistantReply({ propertyId, conversation, text }) {
       return finish(replies, conversation, text, 'ask_dates');
     }
 
-    // 10) Saludo / fallback
+    // 10) Saludo / fallback (con la persona configurada del hotel)
     if (GREETING.test(text)) {
-      say(`¡Hola! 👋 Bienvenido(a) a *${property.name}*. Soy Atria, tu asistente virtual. Puedo ayudarte a consultar disponibilidad, cotizar y reservar. ¿Para qué fechas te gustaría hospedarte?`);
+      const name = profile.displayName || 'Atria';
+      say(profile.greeting
+        || `¡Hola! 👋 Bienvenido(a) a *${property.name}*. Soy ${name}, tu asistente virtual. Puedo ayudarte a consultar disponibilidad, cotizar y reservar. ¿Para qué fechas te gustaría hospedarte?`);
       return finish(replies, conversation, text, 'greeting');
     }
 
-    // Fallback: con LLM responde natural; sin LLM, menú guiado
-    if (llmAvailable()) {
-      const nat = await llmComplete({
-        system: `Eres Atria, asistente virtual del hotel ${property.name} en ${property.city || 'Colombia'}. Responde en español, breve y cálido. Solo puedes ayudar con: disponibilidad, reservas, información del hotel (check-in ${property.checkInTime}, check-out ${property.checkOutTime}, dirección ${property.address || 'N/D'}). No ofrezcas descuentos, reembolsos ni compensaciones: para eso di que transferirás con una persona. Si el huésped quiere reservar, pídele fechas y número de personas.`,
-        messages: [{ role: 'user', content: text }],
-        maxTokens: 300,
-      });
-      if (nat) {
-        say(nat);
-        return finish(replies, conversation, text, 'llm_fallback');
+    // 10b) Guardrail de dominio: si no matchea nada del hotel y el agente es
+    // "solo dominio", redirige amablemente (no responde temas ajenos).
+    {
+      const hit = searchKnowledge(await getSnapshot(), text);
+      if (hit) {
+        say(hit.answer);
+        return finish(replies, conversation, text, 'knowledge_answer');
       }
     }
-    say('Puedo ayudarte con:\n1️⃣ Consultar disponibilidad y reservar\n2️⃣ Información del hotel (ubicación, horarios)\n3️⃣ Hablar con una persona\n\nCuéntame, ¿qué necesitas? Si es una reserva, dime las fechas y número de personas. 😊');
+
+    // Fallback: menú guiado con la identidad del hotel
+    say(`Puedo ayudarte con:\n1️⃣ Consultar disponibilidad y reservar\n2️⃣ Información de *${property.name}* (habitaciones, servicios, ubicación)\n3️⃣ Hablar con una persona\n\nCuéntame, ¿qué necesitas? Si es una reserva, dime las fechas y número de personas. 😊`);
     return finish(replies, conversation, text, 'fallback');
   } catch (err) {
     logger.error({ err }, 'assistant error');
@@ -218,6 +245,35 @@ export async function assistantReply({ propertyId, conversation, text }) {
     await setContext(conversation.id, ctx);
     return { replies, intent };
   }
+}
+
+// IA-3 · Agente natural con control de herramientas. Devuelve true si respondió.
+async function runLlmAgent({ propertyId, profile, conversation, text, getSnapshot, say }) {
+  try {
+    const snapshot = await getSnapshot();
+    const system = buildSystemPrompt(profile, snapshot);
+    const tools = buildTools({ propertyId, profile, conversation });
+    const toolDefs = toolDefsForLLM(tools);
+
+    // Historial reciente para continuidad conversacional
+    const history = await prisma.message.findMany({
+      where: { conversationId: conversation.id },
+      orderBy: { createdAt: 'desc' }, take: 10,
+    });
+    const messages = history.reverse().map(m => ({
+      role: m.direction === 'in' ? 'user' : 'assistant',
+      content: m.body,
+    }));
+    if (!messages.length || messages[messages.length - 1].content !== text) {
+      messages.push({ role: 'user', content: text });
+    }
+
+    const reply = await llmToolLoop({ system, messages, tools, toolDefs });
+    if (reply) { say(reply); return true; }
+  } catch (err) {
+    logger.warn({ err }, 'llm agent failed, falling back to deterministic');
+  }
+  return false;
 }
 
 async function createBookingAndLink({ propertyId, conversation, ctx, property, say, replies, text }) {

@@ -477,6 +477,123 @@ async function main() {
       assert.ok(rules.data.some(r => r.key === 'rnt_expiry'), 'deben existir las reglas por defecto');
     });
 
+    // ===== IA-1: contenido de habitaciones y base de conocimiento =====
+    let rtId;
+    const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+    await test('listar contenido de habitaciones', async () => {
+      const { status, data } = await api(`/api/content/rooms?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(data.length >= 3);
+      rtId = data[0].id;
+      assert.ok(Array.isArray(data[0].images));
+    });
+
+    await test('editar contenido rico de una habitación', async () => {
+      const { status } = await api(`/api/content/rooms/${rtId}`, {
+        method: 'PATCH',
+        body: { longDescription: 'Habitación amplia con vista a la ciudad y cama king.', bedConfig: '1 cama king', sizeM2: 28, view: 'ciudad', features: 'wifi,aire,minibar' },
+      });
+      assert.equal(status, 200);
+      const { data } = await api(`/api/content/rooms?propertyId=${propertyId}`);
+      const rt = data.find(r => r.id === rtId);
+      assert.equal(rt.bedConfig, '1 cama king');
+      assert.equal(rt.sizeM2, 28);
+    });
+
+    await test('subir imagen de habitación y servirla públicamente', async () => {
+      const up = await api('/api/documents', {
+        method: 'POST',
+        body: { propertyId, entityType: 'RoomType', entityId: rtId, docType: 'image', title: 'Foto', fileName: 'room.png', mimeType: 'image/png', base64: tinyPng },
+      });
+      assert.equal(up.status, 201);
+      const { data } = await api(`/api/content/rooms?propertyId=${propertyId}`);
+      const rt = data.find(r => r.id === rtId);
+      assert.ok(rt.images.length >= 1, 'la habitación debe tener la imagen');
+      // Endpoint público sin autenticación
+      const res = await fetch(`${BASE}${rt.images[0].url}`);
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-type') || '', /image/);
+    });
+
+    await test('media pública solo sirve imágenes (no otros documentos)', async () => {
+      // legalDocId es un RUT (docType != image) subido antes
+      const res = await fetch(`${BASE}/api/public/media/${legalDocId}`);
+      assert.equal(res.status, 404, 'un documento que no es imagen no debe servirse como media pública');
+    });
+
+    await test('crear conocimiento y verlo en el snapshot del agente', async () => {
+      await api('/api/content/knowledge', {
+        method: 'POST',
+        body: { propertyId, category: 'service', title: 'Parqueadero', content: 'Parqueadero cubierto gratis para huéspedes.', visibility: 'public', tags: 'carro,parqueo' },
+      });
+      await api('/api/content/knowledge', {
+        method: 'POST',
+        body: { propertyId, category: 'general', title: 'Nota interna', content: 'Solo staff.', visibility: 'internal' },
+      });
+      const pub = await api(`/api/content/knowledge-snapshot?propertyId=${propertyId}&visibility=public`);
+      const titles = pub.data.knowledge.map(k => k.title);
+      assert.ok(titles.includes('Parqueadero'), 'el snapshot público incluye el ítem público');
+      assert.ok(!titles.includes('Nota interna'), 'el snapshot público NO incluye ítems internos');
+      assert.ok(pub.data.rooms.length >= 3 && pub.data.hotel.name, 'el snapshot trae habitaciones y datos del hotel');
+    });
+
+    await test('contenido público de habitaciones sin autenticación (para la web)', async () => {
+      const res = await fetch(`${BASE}/api/public/hotel/${propertyId}/rooms`);
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.ok(data.rooms.length >= 3 && data.hotel.name);
+    });
+
+    // ===== IA-2 / IA-3: persona del agente, conocimiento y guardrails =====
+    await test('agente existe con persona por defecto y es configurable', async () => {
+      const { status, data } = await api(`/api/content/agents?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      const guest = data.find(a => a.scope === 'guest');
+      assert.ok(guest, 'debe existir el agente de huéspedes');
+      const upd = await api(`/api/content/agents/${guest.id}`, {
+        method: 'PATCH',
+        body: { displayName: 'Lucía', greeting: '¡Hola! Soy Lucía, tu anfitriona en Atria. ¿En qué te ayudo?', tone: 'juvenil y cercano' },
+      });
+      assert.equal(upd.status, 200);
+      assert.equal(upd.data.displayName, 'Lucía');
+    });
+
+    await test('el agente saluda con la persona configurada del hotel', async () => {
+      const sid = 'persona-test';
+      const { data } = await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: 'Hola' } });
+      assert.match(data.replies.join(' '), /Luc[ií]a/, 'el saludo debe usar el nombre configurado');
+    });
+
+    await test('el agente responde con el conocimiento del hotel (FAQ)', async () => {
+      const sid = 'know-test';
+      const { data } = await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: '¿Tienen parqueadero?' } });
+      assert.match(data.replies.join(' '), /parqueadero|cubierto|gratis/i, 'debe responder con el ítem de conocimiento "Parqueadero"');
+    });
+
+    await test('el agente responde datos de una habitación desde el contenido', async () => {
+      const sid = 'room-test';
+      const { data } = await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: '¿Qué incluye la habitación Estándar?' } });
+      assert.match(data.replies.join(' '), /king|wifi|ciudad|noche/i, 'debe describir la habitación con su contenido');
+    });
+
+    await test('previsualización del agente sin efectos secundarios', async () => {
+      const { status, data } = await api('/api/content/agents/preview', { method: 'POST', body: { propertyId, question: '¿Tienen parqueadero?' } });
+      assert.equal(status, 200);
+      assert.ok(data.tools.includes('crear_reserva') && data.tools.includes('datos_hotel'));
+      assert.ok(data.roomsKnown >= 3);
+      assert.match(data.answer, /parqueadero|cubierto/i);
+      assert.match(data.systemPromptPreview, /Luc[ií]a/, 'el system prompt refleja la persona');
+    });
+
+    await test('el flujo de reserva por chat sigue funcionando tras los cambios de IA', async () => {
+      const sid = 'flow-after-ai';
+      const ci = futureDay(40), co = futureDay(43);
+      await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: `Quiero reservar del ${ci} al ${co} para 2 adultos` } });
+      const sel = await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: '1' } });
+      assert.match(sel.data.replies.join(' '), /[Tt]otal|anticipo/, 'debe cotizar tras elegir opción');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

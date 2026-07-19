@@ -18,6 +18,7 @@ import { complianceRouter } from './routes/compliance.js';
 import { hrRouter } from './routes/hr.js';
 import { invoicesRouter } from './routes/invoices.js';
 import { documentsRouter } from './routes/documents.js';
+import { contentRouter } from './routes/content.js';
 import { miscRouter } from './routes/misc.js';
 import { publicRouter } from './routes/public.js';
 import { registerAutomations } from './services/automations.js';
@@ -59,6 +60,7 @@ app.use('/api/compliance', authRequired, complianceRouter);
 app.use('/api/hr', authRequired, hrRouter);
 app.use('/api/invoices', authRequired, invoicesRouter);
 app.use('/api/documents', authRequired, documentsRouter);
+app.use('/api/content', authRequired, contentRouter);
 app.use('/api', authRequired, miscRouter);
 
 // Frontend estático: panel admin + página de pago + portal huésped

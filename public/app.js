@@ -111,6 +111,9 @@
     ['crm', '👥 CRM'],
     ['payments', '💳 Pagos'],
     ['invoices', '🧾 Facturación'],
+    ['sep', 'IA & Contenido'],
+    ['content', '🖼️ Habitaciones & Conocimiento'],
+    ['agent', '🤖 Agente IA'],
     ['sep', 'Personas'],
     ['employees', '👔 Empleados'],
     ['payroll', '💰 Nómina'],
@@ -618,6 +621,163 @@
         ${s.status === 'prepared' ? `<button class="btn small secondary" onclick="_sireMark('${s.id}','reported')">Marcar reportado</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">Sin huéspedes extranjeros detectados.</p>'}</div>`;
   }
 
+  async function viewContent() {
+    const [rooms, knowledge] = await Promise.all([
+      get(`/content/rooms?${pid()}`),
+      get(`/content/knowledge?${pid()}`),
+    ]);
+    window._editRoom = r => {
+      const room = rooms.find(x => x.id === r);
+      const m = modal(`
+        <h2>Contenido — ${esc(room.name)}</h2>
+        <label>Descripción corta</label><input id="rDesc" value="${esc(room.description || '')}">
+        <label>Descripción larga (la usa el agente y la web)</label><textarea id="rLong" rows="3">${esc(room.longDescription || '')}</textarea>
+        <div class="row">
+          <div><label>Camas</label><input id="rBed" value="${esc(room.bedConfig || '')}" placeholder="1 king + 1 sofá cama"></div>
+          <div><label>Tamaño m²</label><input id="rSize" type="number" value="${room.sizeM2 || ''}"></div>
+          <div><label>Vista</label><input id="rView" value="${esc(room.view || '')}" placeholder="ciudad"></div>
+        </div>
+        <label>Amenidades (separadas por coma)</label><input id="rAmen" value="${esc(room.amenities || '')}">
+        <label>Características (wifi, aire, minibar, jacuzzi...)</label><input id="rFeat" value="${esc(room.features || '')}">
+        <div style="display:flex;gap:8px;margin-top:14px"><button class="btn" id="rSave">Guardar</button></div>
+        <h3 style="margin-top:20px">Imágenes (${room.images.length})</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">
+          ${room.images.map(im => `<img src="${im.url}" style="width:90px;height:70px;object-fit:cover;border-radius:8px;border:1px solid var(--border)">`).join('') || '<span class="muted">Sin imágenes aún.</span>'}
+        </div>
+        <label>Subir imagen (máx 15 MB)</label><input id="rImg" type="file" accept="image/*">
+        <button class="btn small secondary mt" id="rUpload">Subir imagen</button>`);
+      m.querySelector('#rSave').onclick = async () => {
+        try {
+          await api(`/content/rooms/${room.id}`, { method: 'PATCH', body: {
+            description: m.querySelector('#rDesc').value, longDescription: m.querySelector('#rLong').value,
+            bedConfig: m.querySelector('#rBed').value, sizeM2: m.querySelector('#rSize').value || null,
+            view: m.querySelector('#rView').value, amenities: m.querySelector('#rAmen').value, features: m.querySelector('#rFeat').value,
+          }});
+          toast('Contenido guardado'); m.remove(); render();
+        } catch (err) { toast(err.message, true); }
+      };
+      m.querySelector('#rUpload').onclick = () => {
+        const file = m.querySelector('#rImg').files[0];
+        if (!file) return toast('Selecciona una imagen', true);
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            await api('/documents', { method: 'POST', body: {
+              propertyId: state.propertyId, entityType: 'RoomType', entityId: room.id, docType: 'image',
+              title: `Foto ${room.name}`, fileName: file.name, mimeType: file.type, base64: reader.result,
+            }});
+            toast('Imagen subida'); m.remove(); render();
+          } catch (err) { toast(err.message, true); }
+        };
+        reader.readAsDataURL(file);
+      };
+    };
+    window._addKnow = async () => {
+      try {
+        await api('/content/knowledge', { method: 'POST', body: {
+          propertyId: state.propertyId, category: $('#kCat').value, title: $('#kTitle').value,
+          content: $('#kContent').value, visibility: $('#kVis').value, tags: $('#kTags').value,
+        }});
+        toast('Conocimiento agregado'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._delKnow = async id => {
+      if (!confirm('¿Desactivar este ítem de conocimiento?')) return;
+      try { await api(`/content/knowledge/${id}`, { method: 'DELETE' }); toast('Ítem desactivado'); render(); }
+      catch (err) { toast(err.message, true); }
+    };
+    return `
+      <div class="card"><h3>Habitaciones — contenido que alimenta al agente y la web</h3>
+        <p class="muted" style="font-size:12.5px;margin-bottom:12px">Mientras más completa esté cada habitación (descripción, camas, fotos, amenidades), mejor responderá Atria IA a los huéspedes.</p>
+        <div class="room-grid">
+          ${rooms.map(r => `<div class="room-tile" style="border-top-color:var(--accent2)">
+            ${r.images[0] ? `<img src="${r.images[0].url}" style="width:100%;height:80px;object-fit:cover;border-radius:6px;margin-bottom:6px">` : ''}
+            <div class="num" style="font-size:15px">${esc(r.name)}</div>
+            <div class="type">${cop(r.fromPrice)}/noche · ${r.capacity} pax · ${r.images.length} 📷</div>
+            <div class="muted" style="font-size:11px;margin:4px 0;height:28px;overflow:hidden">${esc(r.longDescription || r.description || 'Sin descripción')}</div>
+            <button class="btn small secondary" onclick="_editRoom('${r.id}')">Editar contenido</button>
+          </div>`).join('')}
+        </div>
+      </div>
+      <div class="card"><h3>Base de conocimiento (FAQs, servicios, ubicación)</h3>
+        <p class="muted" style="font-size:12.5px">Lo <b>público</b> lo usa el agente de huéspedes; lo <b>interno</b>, los asistentes del equipo.</p>
+        <div class="row mt">
+          <div><label>Categoría</label><select id="kCat"><option value="faq">FAQ</option><option value="service">Servicio</option><option value="location">Ubicación</option><option value="amenity">Amenidad</option><option value="attraction">Atracción cercana</option><option value="general">General</option></select></div>
+          <div><label>Visibilidad</label><select id="kVis"><option value="public">Pública</option><option value="internal">Interna</option></select></div>
+          <div><label>Título</label><input id="kTitle" placeholder="¿Tienen parqueadero?"></div>
+          <div><label>Etiquetas</label><input id="kTags" placeholder="parqueo, carro"></div>
+        </div>
+        <label>Contenido / respuesta</label><textarea id="kContent" rows="2" placeholder="Sí, contamos con parqueadero cubierto sin costo para huéspedes."></textarea>
+        <button class="btn small mt" onclick="_addKnow()">Agregar</button>
+        <table class="mt"><tr><th>Categoría</th><th>Título</th><th>Visibilidad</th><th>Contenido</th><th></th></tr>
+        ${knowledge.map(k => `<tr>
+          <td>${esc(k.category)}</td><td>${esc(k.title)}</td>
+          <td>${k.visibility === 'public' ? badge('pública', 'green') : badge('interna', 'yellow')}${k.active ? '' : ' ' + badge('inactiva', 'gray')}</td>
+          <td class="muted" style="font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.content)}</td>
+          <td>${k.active ? `<button class="btn small danger" onclick="_delKnow('${k.id}')">Quitar</button>` : ''}</td>
+        </tr>`).join('')}</table>
+        ${knowledge.length ? '' : '<p class="muted mt">Sin conocimiento aún. Agrega FAQs, servicios y datos del hotel para que el agente responda con precisión.</p>'}
+      </div>`;
+  }
+
+  async function viewAgent() {
+    const agents = await get(`/content/agents?${pid()}`);
+    const guest = agents.find(a => a.scope === 'guest') || agents[0];
+    window._saveAgent = async () => {
+      try {
+        await api(`/content/agents/${guest.id}`, { method: 'PATCH', body: {
+          displayName: $('#agName').value, tone: $('#agTone').value, persona: $('#agPersona').value,
+          languages: $('#agLangs').value, greeting: $('#agGreeting').value,
+          emojis: $('#agEmojis').checked, domainOnly: $('#agDomain').checked, llmEnabled: $('#agLlm').checked,
+        }});
+        toast('Agente actualizado'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._testAgent = async () => {
+      const q = $('#agTest').value.trim();
+      if (!q) return;
+      $('#agAnswer').innerHTML = '<span class="muted">Pensando…</span>';
+      try {
+        const { data } = await api('/content/agents/preview', { method: 'POST', body: { propertyId: state.propertyId, scope: 'guest', question: q } });
+        $('#agAnswer').innerHTML = `<div class="msg in" style="max-width:100%">${esc(data.answer)}</div>`;
+      } catch (err) { $('#agAnswer').innerHTML = `<span style="color:var(--red)">${esc(err.message)}</span>`; }
+    };
+    return `
+      <div class="grid cols-2">
+        <div class="card"><h3>Personalidad de ${esc(guest.displayName)}</h3>
+          <p class="muted" style="font-size:12.5px;margin-bottom:10px">Configura cómo se presenta y habla el agente de este hotel. La "mascota" de cada hotel puede tener su propio nombre y tono.</p>
+          <label>Nombre del agente (la mascota)</label><input id="agName" value="${esc(guest.displayName)}">
+          <label>Tono</label><input id="agTone" value="${esc(guest.tone)}" placeholder="cálido, cercano y profesional">
+          <label>Personalidad / instrucciones</label><textarea id="agPersona" rows="3">${esc(guest.persona || '')}</textarea>
+          <label>Saludo inicial (opcional)</label><input id="agGreeting" value="${esc(guest.greeting || '')}" placeholder="¡Hola! Soy Lucía, tu anfitriona en...">
+          <label>Idiomas</label><input id="agLangs" value="${esc(guest.languages)}" placeholder="es,en">
+          <div class="row mt" style="align-items:center">
+            <label class="fit" style="margin:0"><input type="checkbox" id="agEmojis" ${guest.emojis ? 'checked' : ''} style="width:auto"> Usa emojis</label>
+            <label class="fit" style="margin:0"><input type="checkbox" id="agDomain" ${guest.domainOnly ? 'checked' : ''} style="width:auto"> Solo habla del hotel</label>
+            <label class="fit" style="margin:0"><input type="checkbox" id="agLlm" ${guest.llmEnabled ? 'checked' : ''} style="width:auto"> IA natural (Claude)</label>
+          </div>
+          <button class="btn mt" onclick="_saveAgent()">Guardar configuración</button>
+        </div>
+        <div class="card"><h3>Herramientas que controla</h3>
+          <p class="muted" style="font-size:12.5px">El agente puede ejecutar estas funciones por conversación (con permisos y aprobaciones):</p>
+          <ul style="margin:10px 0 0 18px;font-size:13.5px;line-height:1.9">
+            <li>🔍 Consultar disponibilidad</li>
+            <li>💵 Cotizar con impuestos y anticipo</li>
+            <li>📅 Crear reserva + link de pago</li>
+            <li>🛏️ Dar datos de habitaciones (según lo que configures)</li>
+            <li>🏨 Dar datos del hotel, servicios y políticas</li>
+            <li>🔔 Notificar al equipo interno</li>
+          </ul>
+          <p class="muted mt" style="font-size:12px">Nunca ofrece reembolsos ni descuentos: eso escala a una persona.</p>
+          <hr style="border-color:var(--border);margin:14px 0">
+          <h3>Probar al agente</h3>
+          <div class="row"><input id="agTest" placeholder="¿Tienen parqueadero? ¿La suite tiene jacuzzi?"><button class="btn fit" onclick="_testAgent()">Preguntar</button></div>
+          <div id="agAnswer" class="mt"></div>
+          <p class="muted mt" style="font-size:11.5px">Esta prueba usa el conocimiento configurado en "Habitaciones & Conocimiento". Sin API key de IA, el agente responde con ese conocimiento; con API key, además conversa de forma natural.</p>
+        </div>
+      </div>`;
+  }
+
   async function viewInvoices() {
     const { dataicoConfigured, invoices } = await get(`/invoices?${pid()}`);
     window._issueInv = async id => {
@@ -1010,6 +1170,8 @@
     maintenance: ['Mantenimiento', viewMaintenance],
     payments: ['Pagos y links', viewPayments],
     invoices: ['Facturación electrónica (Dataico)', viewInvoices],
+    content: ['Habitaciones y base de conocimiento', viewContent],
+    agent: ['Agente IA — persona y comportamiento', viewAgent],
     employees: ['Empleados (Atria People)', viewEmployees],
     payroll: ['Nómina colombiana', viewPayroll],
     approvals: ['Aprobaciones humanas', viewApprovals],

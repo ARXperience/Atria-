@@ -23,7 +23,7 @@ npm start                # http://localhost:4000
 | contabilidad@atria.co | Contabilidad |
 | auditor@atria.co | Auditor (solo lectura) |
 
-**Pruebas end-to-end**: `npm test` (46 pruebas de los flujos críticos de la sección 48 del documento).
+**Pruebas end-to-end**: `npm test` (58 pruebas de los flujos críticos de la sección 48 del documento).
 
 ## 📱 Vincular WhatsApp (Baileys)
 
@@ -101,6 +101,20 @@ Módulo **Atria Fiscal** integrado con [Dataico](https://www.dataico.com) como p
 - **Plantillas de mensajes** (§7): WhatsApp/email/voucher con variables `{{nombre}}`, `{{codigo}}`, `{{total}}`.
 - **Políticas hoteleras** (§7): cancelación, check-in, mascotas, no-show, etc., con texto público.
 - **Motor de reglas de cumplimiento** (§39): reglas versionables y parametrizables (anticipación, severidad, destinatario) que se ejecutan **automáticamente cada 6 horas** revisando RNT, documentos, TRA, SIRE y contratos por vencer, y generan alertas. Botón "Ejecutar ahora" en el panel.
+
+## 🤖 Atria IA — Agente con conocimiento, persona y control de funciones (Track IA)
+
+El agente de WhatsApp/webchat ahora es **configurable por hotel** y responde con el **conocimiento real** que el administrador carga:
+
+- **IA-1 · Contenido y conocimiento** (menú *Habitaciones & Conocimiento*): editor de cada habitación (descripción larga, camas, tamaño, vista, amenidades e **imágenes**) + **base de conocimiento** (FAQs, servicios, ubicación) con visibilidad pública/interna. Las imágenes se sirven por URL pública para web y agente.
+- **IA-2 · Persona por hotel** (menú *Agente IA*): nombre de la "mascota", tono, idiomas, saludo, uso de emojis, **guardrail de solo-dominio** (no habla de otros temas) y on/off de IA natural. Cada hotel tiene su propio agente.
+- **IA-3 · Control de funciones**: el agente ejecuta herramientas por conversación — consultar disponibilidad, cotizar, **crear reserva + link de pago**, dar datos de habitación/hotel y **notificar al equipo** — con permisos, aprobaciones y auditoría. Nunca ofrece reembolsos/descuentos: escala a una persona.
+
+**Cómo funciona la IA según tengas o no API key:**
+- **Sin `ANTHROPIC_API_KEY`**: el agente responde con el conocimiento configurado (busca en FAQs, habitaciones y políticas) y ejecuta el flujo completo de reserva de forma determinística. Ya es útil desde el primer momento.
+- **Con `ANTHROPIC_API_KEY`**: además conversa en lenguaje natural y **decide qué herramientas llamar** (function-calling) manteniendo la persona y los guardrails del hotel.
+
+Prueba el agente sin salir del panel: *Agente IA → Probar al agente*.
 
 ## 🗺️ Roadmap (fases siguientes del documento)
 
