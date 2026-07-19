@@ -521,6 +521,26 @@ model PurchaseOrder {
   @@index([propertyId, status])
 }
 
+// ===================== Atria Finance (§28) =====================
+model AccountPayable {
+  id              String   @id @default(cuid())
+  propertyId      String
+  supplierId      String?
+  supplierName    String
+  concept         String
+  category        String   @default("proveedores") // proveedores | servicios | nomina | impuestos | otros
+  amount          Float
+  dueDate         DateTime?
+  status          String   @default("open") // open | paid
+  purchaseOrderId String?
+  paidAt          DateTime?
+  paymentSupport  String?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+
+  @@index([propertyId, status])
+}
+
 // ===================== Atria — Channel manager (§35) =====================
 model Channel {
   id            String   @id @default(cuid())

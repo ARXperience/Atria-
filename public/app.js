@@ -181,6 +181,8 @@
     ['sep', 'Abastecimiento'],
     ['inventory', '📦 Inventario'],
     ['pos', '🍽️ Restaurante (POS)'],
+    ['sep', 'Finanzas'],
+    ['finance', '💵 Finanzas & Cartera'],
     ['sep', 'Gobierno'],
     ['approvals', '✅ Aprobaciones'],
     ['compliance', '⚖️ Cumplimiento'],
@@ -1074,6 +1076,56 @@
       </table>${employees.length ? '' : '<p class="muted">Sin empleados registrados.</p>'}</div>`;
   }
 
+  async function viewFinance() {
+    const [ov, ar, payables, pl] = await Promise.all([
+      get(`/finance/overview?${pid()}`),
+      get(`/finance/receivables?${pid()}`),
+      get(`/finance/payables?${pid()}`),
+      get(`/finance/report?${pid()}`),
+    ]);
+    window._apAdd = async () => {
+      try { await api('/finance/payables', { method: 'POST', body: { propertyId: state.propertyId, supplierName: $('#apSup').value, concept: $('#apConcept').value, category: $('#apCat').value, amount: +$('#apAmount').value, dueDate: $('#apDue').value || null } }); toast('Cuenta por pagar creada'); render(); }
+      catch (e) { toast(e.message, true); }
+    };
+    window._apPay = async id => { const s = prompt('Soporte/referencia del pago:'); if (s === null) return; try { await api(`/finance/payables/${id}/pay`, { method: 'POST', body: { support: s } }); toast('Pago registrado'); render(); } catch (e) { toast(e.message, true); } };
+    setTimeout(animateCounts, 0);
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Ingresos del mes</div><div class="value" style="color:var(--green)"><span data-count="${ov.monthIncome}" data-fmt="cop">$0</span></div></div>
+        <div class="kpi"><div class="label">Egresos del mes</div><div class="value"><span data-count="${ov.monthExpenses}" data-fmt="cop">$0</span></div></div>
+        <div class="kpi"><div class="label">Resultado</div><div class="value" style="color:${ov.monthNet >= 0 ? 'var(--green)' : 'var(--red)'}"><span data-count="${ov.monthNet}" data-fmt="cop">$0</span></div></div>
+        <div class="kpi"><div class="label">Cartera por cobrar</div><div class="value" style="color:${ov.receivable ? 'var(--yellow)' : 'inherit'}"><span data-count="${ov.receivable}" data-fmt="cop">$0</span></div></div>
+      </div>
+      <div class="grid cols-2 mt">
+        <div class="card"><h3>Estado de resultados (mes)</h3>
+          <table><tr><td>Ingresos</td><td class="right" style="color:var(--green)">${cop(pl.income)}</td></tr>
+          ${Object.entries(pl.expenses).map(([k, v]) => `<tr><td class="muted">− ${esc(k)}</td><td class="right muted">${cop(v)}</td></tr>`).join('')}
+          <tr><td><b>Resultado</b></td><td class="right"><b style="color:${pl.result >= 0 ? 'var(--green)' : 'var(--red)'}">${cop(pl.result)}</b></td></tr></table>
+        </div>
+        <div class="card"><h3>Cartera por cobrar (${ar.rows.length})</h3>
+          ${ar.rows.length ? `<table><tr><th>Reserva</th><th>Huésped</th><th>Saldo</th></tr>
+          ${ar.rows.slice(0, 12).map(r => `<tr class="clickable" onclick="location.hash='res:${r.id}'"><td>${esc(r.code)}</td><td>${esc(r.guest)}</td><td><b>${cop(r.balance)}</b></td></tr>`).join('')}</table>
+          <div class="right mt"><b>Total: ${cop(ar.total)}</b></div>` : '<p class="muted">Sin cartera pendiente. 🎉</p>'}
+        </div>
+      </div>
+      <div class="card"><h3>Cuentas por pagar</h3>
+        <div class="row">
+          <div><label>Proveedor</label><input id="apSup"></div>
+          <div><label>Concepto</label><input id="apConcept"></div>
+          <div><label>Categoría</label><select id="apCat"><option value="proveedores">Proveedores</option><option value="servicios">Servicios</option><option value="impuestos">Impuestos</option><option value="otros">Otros</option></select></div>
+          <div><label>Valor</label><input id="apAmount" type="number"></div>
+          <div><label>Vence</label><input id="apDue" type="date"></div>
+          <button class="btn fit" onclick="_apAdd()">Registrar</button>
+        </div>
+        <table class="mt"><tr><th>Proveedor</th><th>Concepto</th><th>Categoría</th><th>Valor</th><th>Vence</th><th>Estado</th><th></th></tr>
+        ${payables.map(p => `<tr><td>${esc(p.supplierName)}</td><td>${esc(p.concept)}</td><td>${esc(p.category)}</td><td>${cop(p.amount)}</td><td>${p.dueDate ? day(p.dueDate) : '—'}</td>
+          <td>${sb(p.status === 'paid' ? 'confirmed' : 'pending')} ${p.status === 'paid' ? 'pagada' : 'pendiente'}</td>
+          <td>${p.status === 'open' ? `<button class="btn small" onclick="_apPay('${p.id}')">Pagar</button>` : ''}</td>
+        </tr>`).join('')}</table>
+        ${payables.length ? '' : '<p class="muted">Sin cuentas por pagar.</p>'}
+      </div>`;
+  }
+
   async function viewChannels() {
     const [ov, channels, catalog, mappings, logs, types] = await Promise.all([
       get(`/channels/overview?${pid()}`),
@@ -1815,6 +1867,7 @@
     pos: ['Restaurante — POS y comandas', viewPos],
     revenue: ['Revenue — forecast y tarifas', viewRevenue],
     channels: ['Channel manager — OTAs', viewChannels],
+    finance: ['Finanzas, contabilidad y cartera', viewFinance],
     approvals: ['Aprobaciones humanas', viewApprovals],
     compliance: ['Cumplimiento (RNT · TRA · SIRE)', viewCompliance],
     documents: ['Centro documental', viewDocuments],

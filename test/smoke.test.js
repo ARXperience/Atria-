@@ -1077,6 +1077,59 @@ async function main() {
       assert.equal(data.overbooking, true, 'debe marcar riesgo de overbooking');
     });
 
+    // ===== Ola 6: Finanzas & cartera (§28) =====
+    let payableId;
+    await test('crear cuenta por pagar', async () => {
+      const ap = await api('/api/finance/payables', { method: 'POST', body: { propertyId, supplierName: 'Lavandería Sur', concept: 'Servicio de lavandería julio', category: 'servicios', amount: 320000 } });
+      assert.equal(ap.status, 201);
+      payableId = ap.data.id;
+      assert.equal(ap.data.status, 'open');
+    });
+
+    await test('cuenta por pagar sin monto se rechaza', async () => {
+      const ap = await api('/api/finance/payables', { method: 'POST', body: { propertyId, supplierName: 'X', concept: 'Y', amount: 0 } });
+      assert.equal(ap.status, 400);
+    });
+
+    await test('overview financiero refleja la CxP abierta', async () => {
+      const { status, data } = await api(`/api/finance/overview?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(data.payableOpen >= 320000, 'la cuenta por pagar debe sumar a payableOpen');
+      assert.ok(typeof data.monthIncome === 'number' && typeof data.monthExpenses === 'number');
+      assert.equal(data.monthNet, Number((data.monthIncome - data.monthExpenses).toFixed(2)));
+    });
+
+    await test('pagar proveedor cambia estado y baja la CxP abierta', async () => {
+      const pay = await api(`/api/finance/payables/${payableId}/pay`, { method: 'POST', body: { support: 'TRX-LAV-01' } });
+      assert.equal(pay.status, 200);
+      assert.equal(pay.data.status, 'paid');
+      const { data } = await api(`/api/finance/overview?propertyId=${propertyId}`);
+      assert.ok(data.breakdown.cxpPagadas >= 320000, 'la CxP pagada debe registrarse como egreso');
+    });
+
+    await test('cartera por cobrar lista reservas con saldo', async () => {
+      const { status, data } = await api(`/api/finance/receivables?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(Array.isArray(data.rows));
+      assert.ok(typeof data.total === 'number');
+      if (data.rows.length) { assert.ok(data.rows[0].id && data.rows[0].code); assert.ok(data.rows[0].balance > 0); }
+    });
+
+    await test('estado de resultados agrega ingresos y egresos por categoría', async () => {
+      const { status, data } = await api(`/api/finance/report?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(typeof data.income === 'number');
+      assert.ok(data.expenses && typeof data.expenses === 'object');
+      assert.ok('servicios' in data.expenses, 'la CxP pagada de servicios debe aparecer en el P&G');
+      assert.equal(data.result, Number((data.income - data.totalExpenses).toFixed(2)));
+    });
+
+    await test('rol housekeeping no puede ver finanzas (permisos backend)', async () => {
+      const { data: login } = await api('/api/auth/login', { method: 'POST', body: { email: 'housekeeping@atria.co', password: 'atria2026' } });
+      const res = await fetch(`${BASE}/api/finance/overview?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${login.token}` } });
+      assert.equal(res.status, 403);
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

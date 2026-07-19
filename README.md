@@ -24,7 +24,7 @@ npm start                # http://localhost:4000
 | rrhh@atria.co | RR. HH. |
 | auditor@atria.co | Auditor (solo lectura) |
 
-**Pruebas end-to-end**: `npm test` (62 pruebas de los flujos críticos de la sección 48 del documento).
+**Pruebas end-to-end**: `npm test` (114 pruebas de los flujos críticos de la sección 48 del documento).
 
 ## 📱 Vincular WhatsApp (Baileys)
 
@@ -147,7 +147,7 @@ src/
   routes/              # API REST por módulo
 prisma/schema.prisma   # modelo de datos completo
 public/                # panel admin + pay + guest + chat
-test/smoke.test.js     # 26 pruebas end-to-end
+test/smoke.test.js     # 114 pruebas end-to-end
 ```
 
 > ⚠️ Los valores legales sembrados (SMMLV, UVT, etc.) son **ejemplos**: actualízalos en Configuración → Parámetros legales con las fuentes oficiales vigentes antes de usar en producción. Este software apoya el cumplimiento operativo pero no reemplaza asesoría legal/contable.
