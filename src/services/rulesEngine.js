@@ -13,6 +13,7 @@ export const DEFAULT_RULES = [
   { key: 'tra_incomplete', name: 'TRA incompletas', severity: 'warning', thresholdDays: null, audienceRole: 'FRONTDESK' },
   { key: 'sire_pending', name: 'Reportes SIRE pendientes', severity: 'warning', thresholdDays: null, audienceRole: 'FRONTDESK' },
   { key: 'contract_expiry', name: 'Contratos por vencer', severity: 'warning', thresholdDays: 30, audienceRole: 'HR' },
+  { key: 'exam_expiry', name: 'Exámenes médicos por vencer', severity: 'warning', thresholdDays: 30, audienceRole: 'HR' },
 ];
 
 export async function ensureDefaultRules(companyId, propertyId = null) {
@@ -51,6 +52,11 @@ const evaluators = {
     const limit = new Date(Date.now() + (rule.thresholdDays || 30) * 86400000);
     const emps = await prisma.employee.findMany({ where: { propertyId: property.id, status: 'active', endDate: { not: null, lte: limit } }, take: 50 });
     return emps.map(e => ({ propertyId: property.id, title: `Contrato por vencer: ${e.fullName}`, body: `Fin de contrato ${e.endDate.toISOString().slice(0, 10)} — decidir prórroga o terminación.`, entityId: e.id, entity: 'Employee' }));
+  },
+  async exam_expiry(rule, property) {
+    const limit = new Date(Date.now() + (rule.thresholdDays || 30) * 86400000);
+    const exams = await prisma.medicalExam.findMany({ where: { propertyId: property.id, validUntil: { not: null, lte: limit } }, take: 50 });
+    return exams.map(x => ({ propertyId: property.id, title: `Examen médico por vencer: ${x.employeeName}`, body: `Examen ${x.type} vence ${x.validUntil.toISOString().slice(0, 10)} — programar renovación (SG-SST).`, entityId: x.id, entity: 'MedicalExam' }));
   },
 };
 

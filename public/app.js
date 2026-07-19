@@ -173,6 +173,7 @@
     ['employees', '👔 Empleados'],
     ['shifts', '📆 Turnos'],
     ['payroll', '💰 Nómina'],
+    ['sgsst', '🦺 SG-SST'],
     ['sep', 'Gobierno'],
     ['approvals', '✅ Aprobaciones'],
     ['compliance', '⚖️ Cumplimiento'],
@@ -1039,6 +1040,69 @@
       </table>${employees.length ? '' : '<p class="muted">Sin empleados registrados.</p>'}</div>`;
   }
 
+  async function viewSgsst() {
+    const [ov, risks, incidents, exams, ppe, trainings, employees] = await Promise.all([
+      get(`/sgsst/overview?${pid()}`),
+      get(`/sgsst/risks?${pid()}`),
+      get(`/sgsst/incidents?${pid()}`),
+      get(`/sgsst/exams?${pid()}`),
+      get(`/sgsst/ppe?${pid()}`),
+      get(`/sgsst/trainings?${pid()}`),
+      get(`/hr/employees?${pid()}&status=active`).catch(() => []),
+    ]);
+    const empOpts = employees.map(e => `<option value="${e.id}">${esc(e.fullName)}</option>`).join('');
+    const P = (path, body) => api(`/sgsst/${path}`, { method: 'POST', body: { propertyId: state.propertyId, ...body } });
+    window._sgRisk = async () => { try { await P('risks', { area: $('#rkArea').value, hazard: $('#rkHaz').value, risk: $('#rkRisk').value, control: $('#rkCtrl').value }); toast('Riesgo agregado'); render(); } catch (e) { toast(e.message, true); } };
+    window._sgInc = async () => { try { await P('incidents', { date: $('#inDate').value, type: $('#inType').value, severity: $('#inSev').value, description: $('#inDesc').value, employeeName: $('#inEmp').value }); toast('Incidente registrado'); render(); } catch (e) { toast(e.message, true); } };
+    window._sgIncClose = async id => { const actions = prompt('Plan de mejora / acciones correctivas:'); if (!actions) return; try { await api(`/sgsst/incidents/${id}/close`, { method: 'POST', body: { actions } }); toast('Incidente cerrado'); render(); } catch (e) { toast(e.message, true); } };
+    window._sgExam = async () => { try { await P('exams', { employeeId: $('#exEmp').value, type: $('#exType').value, date: $('#exDate').value, validUntil: $('#exValid').value || null, restrictions: $('#exRes').value }); toast('Examen registrado'); render(); } catch (e) { toast(e.message, true); } };
+    window._sgPpe = async () => { try { await P('ppe', { employeeId: $('#ppEmp').value, item: $('#ppItem').value, quantity: +$('#ppQty').value || 1, date: $('#ppDate').value }); toast('EPP registrado'); render(); } catch (e) { toast(e.message, true); } };
+    window._sgTrain = async () => { try { await P('trainings', { title: $('#trTitle').value, date: $('#trDate').value, validUntil: $('#trValid').value || null }); toast('Capacitación registrada'); render(); } catch (e) { toast(e.message, true); } };
+    const today = new Date().toISOString().slice(0, 10);
+    const examBadge = x => { if (!x.validUntil) return '—'; const days = Math.ceil((new Date(x.validUntil) - Date.now()) / 86400000); return days < 0 ? badge('vencido', 'red') : days < 30 ? badge(`${days}d`, 'yellow') : day(x.validUntil); };
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Riesgos en matriz</div><div class="value">${ov.risks}</div></div>
+        <div class="kpi"><div class="label">Incidentes abiertos</div><div class="value" style="color:${ov.openIncidents ? 'var(--yellow)' : 'inherit'}">${ov.openIncidents}</div></div>
+        <div class="kpi"><div class="label">Exámenes por vencer</div><div class="value" style="color:${ov.examsExpiring ? 'var(--yellow)' : 'inherit'}">${ov.examsExpiring}</div></div>
+        <div class="kpi"><div class="label">Capacitaciones</div><div class="value">${ov.trainings}</div></div>
+      </div>
+      <div class="grid cols-2 mt">
+        <div class="card"><h3>Matriz de riesgos</h3>
+          <div class="row"><div><label>Área</label><input id="rkArea"></div><div><label>Peligro</label><input id="rkHaz"></div></div>
+          <div class="row"><div><label>Riesgo</label><input id="rkRisk"></div><div><label>Control</label><input id="rkCtrl"></div><button class="btn fit" onclick="_sgRisk()">Agregar</button></div>
+          <table class="mt"><tr><th>Área</th><th>Peligro</th><th>Riesgo</th><th>Control</th></tr>${risks.map(r => `<tr><td>${esc(r.area)}</td><td>${esc(r.hazard)}</td><td>${esc(r.risk)}</td><td class="muted">${esc(r.control || '')}</td></tr>`).join('')}</table>
+          ${risks.length ? '' : '<p class="muted">Sin riesgos registrados.</p>'}
+        </div>
+        <div class="card"><h3>Incidentes y accidentes</h3>
+          <div class="row"><div><label>Fecha</label><input id="inDate" type="date" value="${today}"></div><div><label>Tipo</label><select id="inType"><option value="accidente">Accidente</option><option value="incidente">Incidente</option><option value="casi_accidente">Casi accidente</option><option value="enfermedad">Enfermedad</option></select></div><div><label>Severidad</label><select id="inSev"><option>leve</option><option>grave</option><option>mortal</option></select></div></div>
+          <div class="row"><div><label>Empleado</label><input id="inEmp"></div><div><label>Descripción</label><input id="inDesc"></div><button class="btn fit" onclick="_sgInc()">Registrar</button></div>
+          <table class="mt"><tr><th>Fecha</th><th>Tipo</th><th>Severidad</th><th>Estado</th><th></th></tr>${incidents.map(i => `<tr><td>${day(i.date)}</td><td>${esc(i.type)}</td><td>${i.severity === 'leve' ? badge('leve', 'blue') : badge(i.severity, 'red')}</td><td>${sb(i.status === 'closed' ? 'closed' : 'open')}</td><td>${i.status === 'open' ? `<button class="btn small secondary" onclick="_sgIncClose('${i.id}')">Cerrar</button>` : ''}</td></tr>`).join('')}</table>
+          ${incidents.length ? '' : '<p class="muted">Sin incidentes.</p>'}
+        </div>
+      </div>
+      <div class="card"><h3>Exámenes médicos</h3>
+        <div class="row"><div><label>Empleado</label><select id="exEmp">${empOpts}</select></div><div><label>Tipo</label><select id="exType"><option value="ingreso">Ingreso</option><option value="periodico">Periódico</option><option value="egreso">Egreso</option></select></div><div><label>Fecha</label><input id="exDate" type="date" value="${today}"></div><div><label>Vence</label><input id="exValid" type="date"></div></div>
+        <div class="row"><div><label>Restricciones</label><input id="exRes"></div><button class="btn fit" onclick="_sgExam()">Registrar examen</button></div>
+        <table class="mt"><tr><th>Empleado</th><th>Tipo</th><th>Fecha</th><th>Vence</th><th>Restricciones</th></tr>${exams.map(x => `<tr><td>${esc(x.employeeName)}</td><td>${esc(x.type)}</td><td>${day(x.date)}</td><td>${examBadge(x)}</td><td class="muted">${esc(x.restrictions || '—')}</td></tr>`).join('')}</table>
+        ${exams.length ? '' : '<p class="muted">Sin exámenes registrados.</p>'}
+      </div>
+      <div class="grid cols-2">
+        <div class="card"><h3>Entrega de EPP</h3>
+          <div class="row"><div><label>Empleado</label><select id="ppEmp">${empOpts}</select></div><div><label>Elemento</label><input id="ppItem" placeholder="Guantes"></div><div><label>Cant.</label><input id="ppQty" type="number" value="1"></div><div><label>Fecha</label><input id="ppDate" type="date" value="${today}"></div></div>
+          <button class="btn small mt" onclick="_sgPpe()">Registrar entrega</button>
+          <table class="mt"><tr><th>Empleado</th><th>Elemento</th><th>Cant.</th><th>Fecha</th></tr>${ppe.map(p => `<tr><td>${esc(p.employeeName)}</td><td>${esc(p.item)}</td><td>${p.quantity}</td><td>${day(p.date)}</td></tr>`).join('')}</table>
+          ${ppe.length ? '' : '<p class="muted">Sin entregas.</p>'}
+        </div>
+        <div class="card"><h3>Capacitaciones</h3>
+          <div class="row"><div><label>Título</label><input id="trTitle"></div><div><label>Fecha</label><input id="trDate" type="date" value="${today}"></div><div><label>Vigencia</label><input id="trValid" type="date"></div></div>
+          <button class="btn small mt" onclick="_sgTrain()">Registrar capacitación</button>
+          <table class="mt"><tr><th>Título</th><th>Fecha</th><th>Vigencia</th></tr>${trainings.map(t => `<tr><td>${esc(t.title)}</td><td>${day(t.date)}</td><td>${t.validUntil ? day(t.validUntil) : '—'}</td></tr>`).join('')}</table>
+          ${trainings.length ? '' : '<p class="muted">Sin capacitaciones.</p>'}
+        </div>
+      </div>`;
+  }
+
   async function viewShifts() {
     const today = new Date().toISOString().slice(0, 10);
     const [employees, shifts, attendance] = await Promise.all([
@@ -1469,6 +1533,7 @@
     employees: ['Empleados (Atria People)', viewEmployees],
     shifts: ['Turnos y asistencia', viewShifts],
     payroll: ['Nómina colombiana', viewPayroll],
+    sgsst: ['SG-SST — Seguridad y Salud en el Trabajo', viewSgsst],
     approvals: ['Aprobaciones humanas', viewApprovals],
     compliance: ['Cumplimiento (RNT · TRA · SIRE)', viewCompliance],
     documents: ['Centro documental', viewDocuments],

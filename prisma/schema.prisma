@@ -453,6 +453,85 @@ model AgentProfile {
   @@unique([propertyId, scope])
 }
 
+// ===================== SG-SST (§25) =====================
+
+model SgsstRiskItem {
+  id          String   @id @default(cuid())
+  propertyId  String
+  area        String
+  position    String?
+  hazard      String   // peligro
+  risk        String   // riesgo
+  control     String?
+  responsible String?
+  createdAt   DateTime @default(now())
+
+  @@index([propertyId])
+}
+
+model SgsstIncident {
+  id           String   @id @default(cuid())
+  propertyId   String
+  employeeId   String?
+  employeeName String?
+  date         DateTime
+  type         String   // accidente | incidente | enfermedad | casi_accidente
+  description  String
+  severity     String   @default("leve") // leve | grave | mortal
+  evidence     String?
+  actions      String?
+  status       String   @default("open") // open | closed
+  createdBy    String?
+  closedAt     DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([propertyId, status])
+}
+
+model MedicalExam {
+  id           String   @id @default(cuid())
+  propertyId   String
+  employeeId   String
+  employeeName String
+  type         String   // ingreso | periodico | egreso
+  date         DateTime
+  validUntil   DateTime?
+  result       String?
+  restrictions String?
+  documentId   String?
+  notifiedAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([propertyId, validUntil])
+}
+
+model SgsstTraining {
+  id           String   @id @default(cuid())
+  propertyId   String
+  title        String
+  date         DateTime
+  attendees    String?  // JSON [{id,name}]
+  evidenceDocId String?
+  validUntil   DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([propertyId])
+}
+
+model PpeDelivery {
+  id           String   @id @default(cuid())
+  propertyId   String
+  employeeId   String
+  employeeName String
+  item         String
+  quantity     Int      @default(1)
+  date         DateTime
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  @@index([propertyId])
+}
+
 // ===================== Motor de reglas legales (§39) =====================
 
 model ComplianceRule {

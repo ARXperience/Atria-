@@ -807,6 +807,46 @@ async function main() {
       assert.equal(gen.status, 400, 'debe exigir el cierre de la nómina primero');
     });
 
+    // ===== Ola 2: SG-SST (§25) =====
+    await test('matriz de riesgos: crear ítem', async () => {
+      const { status } = await hr('/api/sgsst/risks', { method: 'POST', body: { propertyId, area: 'Cocina', hazard: 'Superficies calientes', risk: 'Quemaduras', control: 'Guantes térmicos' } });
+      assert.equal(status, 201);
+    });
+
+    let incId;
+    await test('incidente: registrar y cerrar con plan de mejora', async () => {
+      const inc = await hr('/api/sgsst/incidents', { method: 'POST', body: { propertyId, date: futureDay(0), type: 'accidente', severity: 'leve', description: 'Corte menor en cocina', employeeName: 'Laura Rodríguez' } });
+      assert.equal(inc.status, 201);
+      incId = inc.data.id;
+      const noPlan = await hr(`/api/sgsst/incidents/${incId}/close`, { method: 'POST', body: {} });
+      assert.equal(noPlan.status, 400, 'cerrar exige plan de mejora');
+      const closed = await hr(`/api/sgsst/incidents/${incId}/close`, { method: 'POST', body: { actions: 'Capacitación en manejo de cuchillos' } });
+      assert.equal(closed.status, 200);
+      assert.equal(closed.data.status, 'closed');
+    });
+
+    await test('examen médico por vencer dispara alerta del motor de reglas', async () => {
+      await hr('/api/sgsst/exams', { method: 'POST', body: { propertyId, employeeId, type: 'periodico', date: futureDay(-300), validUntil: futureDay(15) } });
+      const ov = await hr(`/api/sgsst/overview?propertyId=${propertyId}`);
+      assert.ok(ov.data.examsExpiring >= 1, 'el panel SG-SST cuenta el examen por vencer');
+      // El motor de reglas (§39) debe detectarlo (lo corre el gerente)
+      const run = await api('/api/documents/rules/run', { method: 'POST' });
+      assert.ok((run.data.detail || []).some(f => f.rule === 'exam_expiry'), 'la regla exam_expiry genera hallazgo');
+    });
+
+    await test('EPP y capacitación se registran', async () => {
+      assert.equal((await hr('/api/sgsst/ppe', { method: 'POST', body: { propertyId, employeeId, item: 'Guantes térmicos', quantity: 2, date: futureDay(0) } })).status, 201);
+      assert.equal((await hr('/api/sgsst/trainings', { method: 'POST', body: { propertyId, title: 'Inducción SG-SST', date: futureDay(0), validUntil: futureDay(365) } })).status, 201);
+    });
+
+    await test('auditor puede ver SG-SST pero NO crear', async () => {
+      const { data: aud } = await api('/api/auth/login', { method: 'POST', body: { email: 'auditor@atria.co', password: 'atria2026' } });
+      const view = await fetch(`${BASE}/api/sgsst/overview?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${aud.token}` } });
+      assert.equal(view.status, 200);
+      const create = await fetch(`${BASE}/api/sgsst/risks`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${aud.token}` }, body: JSON.stringify({ propertyId, area: 'x', hazard: 'y', risk: 'z' }) });
+      assert.equal(create.status, 403, 'auditor no puede crear en SG-SST');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

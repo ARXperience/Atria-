@@ -20,6 +20,7 @@ import { invoicesRouter } from './routes/invoices.js';
 import { documentsRouter } from './routes/documents.js';
 import { contentRouter } from './routes/content.js';
 import { assistantRouter } from './routes/assistant.js';
+import { sgsstRouter } from './routes/sgsst.js';
 import { miscRouter } from './routes/misc.js';
 import { publicRouter } from './routes/public.js';
 import { registerAutomations } from './services/automations.js';
@@ -63,6 +64,7 @@ app.use('/api/invoices', authRequired, invoicesRouter);
 app.use('/api/documents', authRequired, documentsRouter);
 app.use('/api/content', authRequired, contentRouter);
 app.use('/api/assistant', authRequired, assistantRouter);
+app.use('/api/sgsst', authRequired, sgsstRouter);
 app.use('/api', authRequired, miscRouter);
 
 // Frontend estático: panel admin + página de pago + portal huésped
