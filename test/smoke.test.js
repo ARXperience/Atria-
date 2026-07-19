@@ -1327,6 +1327,56 @@ async function main() {
       assert.ok(data.campaignsSent >= 1 && data.totalSent >= 1);
     });
 
+    // ===== Reputación & reseñas (§37) =====
+    await test('registrar reseña con calificación inválida se rechaza', async () => {
+      const r = await api('/api/reputation/reviews', { method: 'POST', body: { propertyId, guestName: 'X', source: 'google', rating: 9 } });
+      assert.equal(r.status, 400);
+    });
+
+    let reviewId;
+    await test('registrar reseña de OTA calcula el sentimiento', async () => {
+      const r = await api('/api/reputation/reviews', { method: 'POST', body: { propertyId, guestName: 'Pedro Niño', source: 'google', rating: 5, comment: 'Excelente atención.' } });
+      assert.equal(r.status, 201);
+      reviewId = r.data.id;
+      assert.equal(r.data.sentiment, 'positive');
+      assert.equal(r.data.status, 'published');
+    });
+
+    await test('el huésped deja reseña desde su portal (público)', async () => {
+      const res = await fetch(`${BASE}/api/public/guest/reservation/${reservation.code}/review`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ rating: 2, comment: 'El wifi fallaba.' }),
+      });
+      assert.equal(res.status, 201);
+      const dup = await fetch(`${BASE}/api/public/guest/reservation/${reservation.code}/review`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rating: 3 }),
+      });
+      assert.equal(dup.status, 409, 'no permite dos reseñas directas por reserva');
+    });
+
+    await test('sugerencia de respuesta de la IA se adapta al sentimiento', async () => {
+      const pos = await api(`/api/reputation/reviews/${reviewId}/draft`);
+      assert.equal(pos.status, 200);
+      assert.ok(pos.data.draft && pos.data.draft.length > 20);
+    });
+
+    await test('responder una reseña la marca como respondida', async () => {
+      const r = await api(`/api/reputation/reviews/${reviewId}/respond`, { method: 'POST', body: { response: '¡Gracias por tu visita, Pedro!' } });
+      assert.equal(r.status, 200);
+      assert.equal(r.data.status, 'responded');
+      assert.ok(r.data.respondedAt);
+    });
+
+    await test('overview de reputación agrega media, distribución y NPS', async () => {
+      const { status, data } = await api(`/api/reputation/overview?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(data.count >= 2);
+      assert.ok(data.avg > 0 && data.avg <= 5);
+      assert.ok(typeof data.nps === 'number');
+      assert.ok(data.responseRate >= 1, 'al menos una respondida');
+      assert.ok(data.distribution[5] >= 1 && data.distribution[2] >= 1);
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

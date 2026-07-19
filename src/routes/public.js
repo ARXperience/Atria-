@@ -5,6 +5,7 @@ import { prisma } from '../db.js';
 import { handleGatewayWebhook } from '../services/payments.js';
 import { upsertConversation, saveInbound, sendOutbound } from '../services/inbox.js';
 import { assistantReply } from '../services/ai/assistant.js';
+import { createReview } from '../services/reputation.js';
 import { fmtCOP, dayStr, parseDay } from '../lib/util.js';
 import { logger } from '../lib/logger.js';
 
@@ -198,4 +199,19 @@ publicRouter.get('/guest/reservation/:code', async (req, res) => {
     checkInTime: r.property.checkInTime, checkOutTime: r.property.checkOutTime,
     pendingLink: r.paymentLinks.find(l => l.status === 'active')?.token || null,
   });
+});
+
+// El huésped deja una reseña post-estancia desde su portal (con el código).
+publicRouter.post('/guest/reservation/:code/review', async (req, res) => {
+  const r = await prisma.reservation.findUnique({ where: { code: req.params.code }, include: { guest: true } });
+  if (!r) return res.status(404).json({ error: 'Reserva no encontrada' });
+  const existing = await prisma.review.findFirst({ where: { reservationId: r.id, source: 'direct' } });
+  if (existing) return res.status(409).json({ error: 'Ya registramos tu reseña. ¡Gracias!' });
+  try {
+    const review = await createReview({
+      propertyId: r.propertyId, reservationId: r.id, guestId: r.guestId, guestName: r.guest.fullName,
+      source: 'direct', rating: req.body?.rating, title: req.body?.title || null, comment: req.body?.comment || null,
+    });
+    res.status(201).json({ ok: true, rating: review.rating });
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });

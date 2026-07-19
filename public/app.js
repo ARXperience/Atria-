@@ -165,6 +165,7 @@
     ['inbox', '💬 Inbox / WhatsApp'],
     ['crm', '👥 CRM'],
     ['marketing', '📣 Marketing'],
+    ['reputation', '⭐ Reputación'],
     ['payments', '💳 Pagos'],
     ['invoices', '🧾 Facturación'],
     ['sep', 'IA & Contenido'],
@@ -1355,6 +1356,67 @@
       </div>`;
   }
 
+  async function viewReputation() {
+    const ov = await get(`/reputation/overview?${pid()}`);
+    const srcLabel = { direct: 'Directo', google: 'Google', booking: 'Booking', tripadvisor: 'Tripadvisor', expedia: 'Expedia' };
+    const stars = n => '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n);
+    const senC = { positive: 'var(--green)', neutral: 'var(--yellow)', negative: 'var(--red)' };
+    const maxDist = Math.max(1, ...Object.values(ov.distribution));
+    window._rvImport = async () => {
+      try { await api('/reputation/reviews', { method: 'POST', body: { propertyId: state.propertyId, guestName: $('#rvName').value, source: $('#rvSource').value, rating: +$('#rvRating').value, comment: $('#rvComment').value || null } }); toast('Reseña registrada'); render(); }
+      catch (e) { toast(e.message, true); }
+    };
+    window._rvRespond = async id => {
+      let draft = '';
+      try { draft = (await api(`/reputation/reviews/${id}/draft`)).draft; } catch { /* opcional */ }
+      const resp = prompt('Respuesta a la reseña (puedes editar la sugerencia de la IA):', draft);
+      if (resp === null || !resp.trim()) return;
+      try { await api(`/reputation/reviews/${id}/respond`, { method: 'POST', body: { response: resp } }); toast('Respuesta publicada'); render(); }
+      catch (e) { toast(e.message, true); }
+    };
+    setTimeout(animateCounts, 0);
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Calificación media</div><div class="value" style="color:var(--accent)">${ov.avg || '—'}<small> /5 ★</small></div></div>
+        <div class="kpi"><div class="label">Reseñas</div><div class="value"><span data-count="${ov.count}">0</span></div></div>
+        <div class="kpi"><div class="label">Tasa de respuesta</div><div class="value"><span data-count="${ov.responseRate}" data-fmt="pct">0%</span></div></div>
+        <div class="kpi"><div class="label">NPS aprox.</div><div class="value" style="color:${ov.nps >= 0 ? 'var(--green)' : 'var(--red)'}"><span data-count="${ov.nps}">0</span></div></div>
+      </div>
+
+      <div class="grid cols-2 mt">
+        <div class="card"><h3>Distribución de estrellas</h3>
+          ${[5, 4, 3, 2, 1].map(n => `<div class="row" style="align-items:center;gap:10px;margin:6px 0">
+            <span style="width:56px;color:var(--accent)">${stars(n)}</span>
+            <div style="flex:1;height:10px;background:var(--surface-2);border-radius:6px;overflow:hidden"><div style="height:100%;width:${Math.round((ov.distribution[n] / maxDist) * 100)}%;background:var(--accent-grad)"></div></div>
+            <span class="muted" style="width:30px;text-align:right">${ov.distribution[n]}</span>
+          </div>`).join('')}
+          <div class="mt muted" style="font-size:12px">${ov.pending} sin responder · ${ov.responded} respondidas</div>
+        </div>
+        <div class="card"><h3>Registrar reseña (OTA / manual)</h3>
+          <div class="row">
+            <div><label>Huésped</label><input id="rvName"></div>
+            <div><label>Fuente</label><select id="rvSource"><option value="google">Google</option><option value="booking">Booking</option><option value="tripadvisor">Tripadvisor</option><option value="expedia">Expedia</option><option value="direct">Directo</option></select></div>
+            <div><label>Estrellas</label><select id="rvRating"><option value="5">★★★★★</option><option value="4">★★★★</option><option value="3">★★★</option><option value="2">★★</option><option value="1">★</option></select></div>
+          </div>
+          <div class="mt"><label>Comentario</label><textarea id="rvComment" rows="3" placeholder="Opcional"></textarea></div>
+          <div class="right mt"><button class="btn" onclick="_rvImport()">Registrar reseña</button></div>
+        </div>
+      </div>
+
+      <div class="card mt"><h3>Reseñas recientes</h3>
+        ${ov.recent.length ? ov.recent.map(r => `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
+          <div class="row" style="justify-content:space-between;align-items:baseline">
+            <div><b style="color:var(--accent)">${stars(r.rating)}</b> <b>${esc(r.guestName)}</b> <span class="badge gray" style="font-size:10.5px">${srcLabel[r.source] || esc(r.source)}</span> <span style="color:${senC[r.sentiment]};font-size:12px">●</span></div>
+            <span class="muted" style="font-size:12px">${day(r.createdAt)}</span>
+          </div>
+          ${r.title ? `<div style="margin-top:4px"><b>${esc(r.title)}</b></div>` : ''}
+          ${r.comment ? `<div class="muted" style="margin-top:4px">${esc(r.comment)}</div>` : ''}
+          ${r.response ? `<div style="margin-top:8px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm);border-left:3px solid var(--accent)"><div class="muted" style="font-size:11.5px;margin-bottom:3px">Respuesta del hotel · ${esc(r.respondedBy || '')}</div>${esc(r.response)}</div>`
+            : `<div class="mt"><button class="btn small ghost" onclick="_rvRespond('${r.id}')">✨ Responder (sugerencia IA)</button></div>`}
+        </div>`).join('') : '<p class="muted">Aún no hay reseñas. Los huéspedes pueden dejarlas desde su portal al finalizar la estadía.</p>'}
+      </div>`;
+  }
+
   async function viewChannels() {
     const [ov, channels, catalog, mappings, logs, types] = await Promise.all([
       get(`/channels/overview?${pid()}`),
@@ -2082,6 +2144,7 @@
     inbox: ['Inbox omnicanal', viewInbox],
     crm: ['CRM — Leads', viewCrm],
     marketing: ['Marketing & campañas', viewMarketing],
+    reputation: ['Reputación & reseñas', viewReputation],
     housekeeping: ['Housekeeping', viewHousekeeping],
     maintenance: ['Mantenimiento', viewMaintenance],
     payments: ['Pagos y links', viewPayments],

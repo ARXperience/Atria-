@@ -13,7 +13,7 @@ const PERMISSIONS = {
     'dashboard.view', 'reservations.*', 'booking.*', 'rooms.*', 'guests.*', 'crm.*', 'inbox.*',
     'payments.*', 'housekeeping.*', 'maintenance.*', 'compliance.*', 'approvals.*', 'audit.view',
     'settings.view', 'whatsapp.*', 'notifications.*', 'users.view', 'users.manage', 'settings.edit',
-    'hr.*', 'payroll.view', 'payroll.manage', 'invoices.*', 'documents.*', 'content.*', 'sgsst.*', 'inventory.*', 'pos.*', 'revenue.*', 'channels.*', 'finance.*', 'dataprotection.*', 'fontur.*', 'marketing.*',
+    'hr.*', 'payroll.view', 'payroll.manage', 'invoices.*', 'documents.*', 'content.*', 'sgsst.*', 'inventory.*', 'pos.*', 'revenue.*', 'channels.*', 'finance.*', 'dataprotection.*', 'fontur.*', 'marketing.*', 'reputation.*',
   ],
   FRONTDESK: [
     'dashboard.view', 'reservations.*', 'booking.*', 'rooms.view', 'rooms.status', 'guests.*',
@@ -21,11 +21,11 @@ const PERMISSIONS = {
     'housekeeping.create', 'maintenance.create', 'maintenance.view', 'compliance.tra', 'compliance.sire',
     'compliance.view', 'notifications.*', 'whatsapp.view', 'crm.view', 'crm.create',
     'invoices.view', 'invoices.create', 'documents.view', 'documents.manage', 'pos.*',
-    'dataprotection.view', 'dataprotection.consent',
+    'dataprotection.view', 'dataprotection.consent', 'reputation.view', 'reputation.respond',
   ],
   SALES: [
     'dashboard.view', 'crm.*', 'inbox.*', 'booking.*', 'reservations.view', 'reservations.create',
-    'payments.link', 'guests.*', 'notifications.*', 'whatsapp.view', 'content.*', 'revenue.view', 'channels.view', 'marketing.*',
+    'payments.link', 'guests.*', 'notifications.*', 'whatsapp.view', 'content.*', 'revenue.view', 'channels.view', 'marketing.*', 'reputation.view', 'reputation.respond',
   ],
   HOUSEKEEPING: ['housekeeping.*', 'rooms.view', 'rooms.status', 'maintenance.create', 'notifications.*'],
   MAINTENANCE: ['maintenance.*', 'rooms.view', 'notifications.*'],

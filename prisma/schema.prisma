@@ -1260,3 +1260,26 @@ model Campaign {
 
   @@index([propertyId, status])
 }
+
+// ===== Reputación & reseñas (§37) =====
+model Review {
+  id            String   @id @default(cuid())
+  propertyId    String
+  reservationId String?
+  guestId       String?
+  guestName     String
+  source        String   @default("direct") // direct | google | booking | tripadvisor | expedia
+  rating        Int      // 1..5
+  title         String?
+  comment       String?
+  sentiment     String   @default("neutral") // positive | neutral | negative
+  status        String   @default("published") // published | responded | hidden
+  response      String?
+  respondedBy   String?
+  respondedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([propertyId, status])
+  @@index([propertyId, source])
+}
