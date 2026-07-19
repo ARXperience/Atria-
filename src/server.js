@@ -22,6 +22,7 @@ import { contentRouter } from './routes/content.js';
 import { assistantRouter } from './routes/assistant.js';
 import { sgsstRouter } from './routes/sgsst.js';
 import { inventoryRouter } from './routes/inventory.js';
+import { posRouter } from './routes/pos.js';
 import { miscRouter } from './routes/misc.js';
 import { publicRouter } from './routes/public.js';
 import { registerAutomations } from './services/automations.js';
@@ -67,6 +68,7 @@ app.use('/api/content', authRequired, contentRouter);
 app.use('/api/assistant', authRequired, assistantRouter);
 app.use('/api/sgsst', authRequired, sgsstRouter);
 app.use('/api/inventory', authRequired, inventoryRouter);
+app.use('/api/pos', authRequired, posRouter);
 app.use('/api', authRequired, miscRouter);
 
 // Frontend estático: panel admin + página de pago + portal huésped

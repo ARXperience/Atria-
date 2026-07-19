@@ -520,6 +520,40 @@ model PurchaseOrder {
   @@index([propertyId, status])
 }
 
+// ===================== Atria Service — Restaurante/POS (§32) =====================
+
+model MenuItem {
+  id         String   @id @default(cuid())
+  propertyId String
+  name       String
+  category   String   @default("comida") // comida | bebida | minibar | postre
+  price      Float
+  recipe     String?  // JSON [{productId, qty}] para costeo/descuento de inventario
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@index([propertyId, active])
+}
+
+model PosOrder {
+  id            String   @id @default(cuid())
+  propertyId    String
+  type          String   @default("table") // table | room_service | minibar
+  tableLabel    String?
+  reservationId String?
+  items         String   // JSON [{menuItemId, name, qty, price, total}]
+  subtotal      Float
+  tax           Float
+  total         Float
+  status        String   @default("open") // open | charged | paid | void
+  method        String?
+  createdBy     String?
+  chargedAt     DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([propertyId, status])
+}
+
 // ===================== SG-SST (§25) =====================
 
 model SgsstRiskItem {

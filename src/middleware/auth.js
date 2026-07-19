@@ -13,14 +13,14 @@ const PERMISSIONS = {
     'dashboard.view', 'reservations.*', 'booking.*', 'rooms.*', 'guests.*', 'crm.*', 'inbox.*',
     'payments.*', 'housekeeping.*', 'maintenance.*', 'compliance.*', 'approvals.*', 'audit.view',
     'settings.view', 'whatsapp.*', 'notifications.*', 'users.view', 'users.manage', 'settings.edit',
-    'hr.*', 'payroll.view', 'payroll.manage', 'invoices.*', 'documents.*', 'content.*', 'sgsst.*', 'inventory.*',
+    'hr.*', 'payroll.view', 'payroll.manage', 'invoices.*', 'documents.*', 'content.*', 'sgsst.*', 'inventory.*', 'pos.*',
   ],
   FRONTDESK: [
     'dashboard.view', 'reservations.*', 'booking.*', 'rooms.view', 'rooms.status', 'guests.*',
     'inbox.*', 'payments.view', 'payments.link', 'payments.manual_request', 'housekeeping.view',
     'housekeeping.create', 'maintenance.create', 'maintenance.view', 'compliance.tra', 'compliance.sire',
     'compliance.view', 'notifications.*', 'whatsapp.view', 'crm.view', 'crm.create',
-    'invoices.view', 'invoices.create', 'documents.view', 'documents.manage',
+    'invoices.view', 'invoices.create', 'documents.view', 'documents.manage', 'pos.*',
   ],
   SALES: [
     'dashboard.view', 'crm.*', 'inbox.*', 'booking.*', 'reservations.view', 'reservations.create',

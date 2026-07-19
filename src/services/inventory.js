@@ -9,14 +9,16 @@ import { money } from '../lib/util.js';
 
 const SIGN = { in: 1, out: -1, consumption: -1, adjustment: 1 };
 
-export async function registerMovement({ propertyId, productId, type, quantity, reason = null, reference = null, unitCost = null, createdBy = null, actor = 'human' }) {
+export async function registerMovement({ propertyId, productId, type, quantity, reason = null, reference = null, unitCost = null, createdBy = null, actor = 'human', allowNegative = false }) {
   const product = await prisma.product.findUnique({ where: { id: productId } });
   if (!product || product.propertyId !== propertyId) throw new Error('Producto inválido');
   if (!(quantity > 0)) throw new Error('La cantidad debe ser mayor a cero');
   const delta = (SIGN[type] ?? 0) * quantity;
   if (delta === 0 && type !== 'adjustment') throw new Error(`Tipo de movimiento inválido: ${type}`);
   const newStock = Math.round((product.stock + delta) * 1000) / 1000;
-  if (newStock < 0) throw new Error(`Stock insuficiente: hay ${product.stock} ${product.unit} de ${product.name}`);
+  // El consumo del POS puede dejar el stock en negativo (refleja el faltante real
+  // y dispara la alerta de reposición) en vez de bloquear la venta.
+  if (newStock < 0 && !allowNegative) throw new Error(`Stock insuficiente: hay ${product.stock} ${product.unit} de ${product.name}`);
 
   const movement = await prisma.$transaction(async tx => {
     const m = await tx.stockMovement.create({ data: { propertyId, productId, type, quantity, reason, reference, unitCost, createdBy } });

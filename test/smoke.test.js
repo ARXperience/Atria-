@@ -898,6 +898,50 @@ async function main() {
       assert.ok((run.data.detail || []).some(f => f.rule === 'low_stock'), 'la regla low_stock genera hallazgo');
     });
 
+    // ===== Ola 3: POS de restaurante (§32) =====
+    let menuItemId, posProductId;
+    await test('crear ítem de menú con receta (insumo)', async () => {
+      const p = await api('/api/inventory/products', { method: 'POST', body: { propertyId, sku: 'GRANO-CAFE', name: 'Grano de café', unit: 'g', cost: 30, stock: 1000, stockMin: 100 } });
+      posProductId = p.data.id;
+      const mi = await api('/api/pos/menu', { method: 'POST', body: { propertyId, name: 'Café americano', category: 'bebida', price: 6000, recipe: [{ productId: posProductId, qty: 15 }] } });
+      assert.equal(mi.status, 201);
+      menuItemId = mi.data.id;
+    });
+
+    await test('comanda de mesa pagada descuenta el inventario por receta', async () => {
+      const ord = await api('/api/pos/orders', { method: 'POST', body: { propertyId, type: 'table', tableLabel: 'Mesa 3', items: [{ menuItemId, qty: 2 }] } });
+      assert.equal(ord.status, 201);
+      assert.ok(ord.data.total > ord.data.subtotal, 'incluye impuesto');
+      const charge = await api(`/api/pos/orders/${ord.data.id}/charge`, { method: 'POST', body: { method: 'efectivo' } });
+      assert.equal(charge.status, 200);
+      assert.equal(charge.data.status, 'paid');
+      // 1000 - (15 * 2) = 970
+      const prods = await api(`/api/inventory/products?propertyId=${propertyId}`);
+      assert.equal(prods.data.find(p => p.id === posProductId).stock, 970, 'la receta descontó 30 g de café');
+    });
+
+    await test('room service se carga al folio de una habitación en casa', async () => {
+      // Crear reserva, pagar, check-in
+      const ci = futureDay(1), co = futureDay(2);
+      const av = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1 } });
+      const resv = await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1, roomTypeId: av.data[0].roomTypeId, guest: { fullName: 'Huésped POS' } } });
+      await api('/api/public/webhooks/payments/mock', { method: 'POST', body: { reference: resv.data.paymentLink.token } });
+      await settle();
+      await api(`/api/reservations/${resv.data.reservation.id}/checkin`, { method: 'POST', body: {} });
+      // Room service → cargar al folio
+      const ord = await api('/api/pos/orders', { method: 'POST', body: { propertyId, type: 'room_service', reservationId: resv.data.reservation.id, items: [{ menuItemId, qty: 1 }] } });
+      const charge = await api(`/api/pos/orders/${ord.data.id}/charge`, { method: 'POST' });
+      assert.equal(charge.data.status, 'charged');
+      const full = await api(`/api/reservations/${resv.data.reservation.id}`);
+      assert.ok(full.data.folio.charges.some(c => c.concept === 'room_service'), 'el folio tiene el cargo de room service');
+    });
+
+    await test('no se puede cargar room service a una habitación sin check-in', async () => {
+      const ord = await api('/api/pos/orders', { method: 'POST', body: { propertyId, type: 'room_service', reservationId: reservation.id, items: [{ menuItemId, qty: 1 }] } });
+      const charge = await api(`/api/pos/orders/${ord.data.id}/charge`, { method: 'POST' });
+      assert.equal(charge.status, 400, 'la reserva original ya hizo check-out');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

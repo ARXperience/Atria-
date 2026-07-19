@@ -176,6 +176,7 @@
     ['sgsst', '🦺 SG-SST'],
     ['sep', 'Abastecimiento'],
     ['inventory', '📦 Inventario'],
+    ['pos', '🍽️ Restaurante (POS)'],
     ['sep', 'Gobierno'],
     ['approvals', '✅ Aprobaciones'],
     ['compliance', '⚖️ Cumplimiento'],
@@ -1042,6 +1043,76 @@
       </table>${employees.length ? '' : '<p class="muted">Sin empleados registrados.</p>'}</div>`;
   }
 
+  async function viewPos() {
+    const [menu, orders, inhouse, products] = await Promise.all([
+      get(`/pos/menu?${pid()}`),
+      get(`/pos/orders?${pid()}`),
+      get(`/reservations?${pid()}&status=checked_in`).catch(() => []),
+      get(`/inventory/products?${pid()}`).catch(() => []),
+    ]);
+    // Carrito en memoria de sesión
+    state.pos = state.pos || { cart: [] };
+    const cart = state.pos.cart;
+    window._menuAdd = async () => {
+      try {
+        const recipe = $('#miProd').value ? [{ productId: $('#miProd').value, qty: +$('#miQty').value || 1 }] : null;
+        await api('/pos/menu', { method: 'POST', body: { propertyId: state.propertyId, name: $('#miName').value, category: $('#miCat').value, price: +$('#miPrice').value, recipe } });
+        toast('Ítem de menú creado'); render();
+      } catch (e) { toast(e.message, true); }
+    };
+    window._cartAdd = () => {
+      const id = $('#ordItem').value; const mi = menu.find(m => m.id === id);
+      if (!mi) return;
+      const ex = cart.find(c => c.menuItemId === id);
+      if (ex) ex.qty++; else cart.push({ menuItemId: id, name: mi.name, price: mi.price, qty: 1 });
+      render();
+    };
+    window._cartDel = i => { cart.splice(i, 1); render(); };
+    window._ordCreate = async () => {
+      if (!cart.length) return toast('Agrega ítems a la comanda', true);
+      const type = $('#ordType').value;
+      const reservationId = type !== 'table' ? ($('#ordRes').value || null) : null;
+      if (type !== 'table' && !reservationId) return toast('Selecciona la habitación en casa', true);
+      try {
+        await api('/pos/orders', { method: 'POST', body: { propertyId: state.propertyId, type, tableLabel: $('#ordTable').value || null, reservationId, items: cart.map(c => ({ menuItemId: c.menuItemId, qty: c.qty })) } });
+        state.pos.cart = []; toast('Comanda creada'); render();
+      } catch (e) { toast(e.message, true); }
+    };
+    window._ordCharge = async (id, toRoom) => {
+      try { await api(`/pos/orders/${id}/charge`, { method: 'POST', body: { method: 'efectivo' } }); toast(toRoom ? 'Cargado al folio de la habitación' : 'Comanda cobrada'); render(); }
+      catch (e) { toast(e.message, true); }
+    };
+    const cartTotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
+    return `
+      <div class="grid cols-2">
+        <div class="card"><h3>Nueva comanda</h3>
+          <div class="row">
+            <div><label>Tipo</label><select id="ordType"><option value="table">Mesa</option><option value="room_service">Room service</option><option value="minibar">Minibar</option></select></div>
+            <div><label>Mesa (opcional)</label><input id="ordTable" placeholder="Mesa 4"></div>
+            <div><label>Habitación en casa</label><select id="ordRes"><option value="">—</option>${inhouse.map(r => `<option value="${r.id}">Hab ${esc(r.room?.number || '?')} · ${esc(r.guest.fullName)}</option>`).join('')}</select></div>
+          </div>
+          <div class="row"><div><label>Ítem</label><select id="ordItem">${menu.map(m => `<option value="${m.id}">${esc(m.name)} — ${cop(m.price)}</option>`).join('')}</select></div><button class="btn fit" onclick="_cartAdd()">Agregar</button></div>
+          <table class="mt"><tr><th>Ítem</th><th>Cant.</th><th>Subtotal</th><th></th></tr>
+          ${cart.map((c, i) => `<tr><td>${esc(c.name)}</td><td>${c.qty}</td><td>${cop(c.price * c.qty)}</td><td><button class="btn small danger" onclick="_cartDel(${i})">×</button></td></tr>`).join('')}</table>
+          ${cart.length ? `<div class="right mt"><b>Total: ${cop(cartTotal)}</b></div><button class="btn mt" onclick="_ordCreate()">Crear comanda</button>` : '<p class="muted mt">Agrega ítems del menú.</p>'}
+        </div>
+        <div class="card"><h3>Menú <span class="muted" style="font-size:12px">(la receta descuenta inventario)</span></h3>
+          <div class="row"><div><label>Nombre</label><input id="miName"></div><div><label>Categoría</label><select id="miCat"><option value="comida">Comida</option><option value="bebida">Bebida</option><option value="minibar">Minibar</option><option value="postre">Postre</option></select></div><div><label>Precio</label><input id="miPrice" type="number"></div></div>
+          <div class="row"><div><label>Insumo (receta)</label><select id="miProd"><option value="">—</option>${products.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div><div><label>Cant. insumo</label><input id="miQty" type="number" value="1"></div><button class="btn fit" onclick="_menuAdd()">Crear ítem</button></div>
+          <table class="mt"><tr><th>Ítem</th><th>Categoría</th><th>Precio</th><th>Receta</th></tr>${menu.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.category)}</td><td>${cop(m.price)}</td><td>${m.recipe ? '✔' : '—'}</td></tr>`).join('')}</table>
+          ${menu.length ? '' : '<p class="muted">Sin ítems de menú.</p>'}
+        </div>
+      </div>
+      <div class="card"><h3>Comandas</h3>
+        <table><tr><th>Fecha</th><th>Tipo</th><th>Ítems</th><th>Total</th><th>Estado</th><th></th></tr>
+        ${orders.map(o => `<tr><td>${dt(o.createdAt)}</td><td>${esc(o.type)}${o.tableLabel ? ' · ' + esc(o.tableLabel) : ''}</td><td>${o.items.length}</td><td>${cop(o.total)}</td>
+          <td>${sb(o.status === 'charged' || o.status === 'paid' ? 'confirmed' : 'open')} ${esc(o.status)}</td>
+          <td>${o.status === 'open' ? `<button class="btn small" onclick="_ordCharge('${o.id}',${!!o.reservationId})">${o.reservationId ? 'Cargar a habitación' : 'Cobrar'}</button>` : ''}</td>
+        </tr>`).join('')}</table>
+        ${orders.length ? '' : '<p class="muted">Sin comandas.</p>'}
+      </div>`;
+  }
+
   async function viewInventory() {
     const [ov, suppliers, products, movements, pos] = await Promise.all([
       get(`/inventory/overview?${pid()}`),
@@ -1609,6 +1680,7 @@
     payroll: ['Nómina colombiana', viewPayroll],
     sgsst: ['SG-SST — Seguridad y Salud en el Trabajo', viewSgsst],
     inventory: ['Inventario, proveedores y compras', viewInventory],
+    pos: ['Restaurante — POS y comandas', viewPos],
     approvals: ['Aprobaciones humanas', viewApprovals],
     compliance: ['Cumplimiento (RNT · TRA · SIRE)', viewCompliance],
     documents: ['Centro documental', viewDocuments],
