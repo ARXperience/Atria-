@@ -663,6 +663,31 @@ model PayrollPeriod {
   @@unique([propertyId, year, month])
 }
 
+// Nómina electrónica DIAN (§22): documento soporte de pago por empleado.
+model ElectronicPayrollDocument {
+  id           String   @id @default(cuid())
+  companyId    String
+  propertyId   String
+  periodId     String
+  employeeId   String
+  employeeName String
+  number       Int?
+  fullNumber   String?
+  cune         String?  // código único del documento soporte (solo con proveedor)
+  earned       Float
+  deductions   Float
+  net          Float
+  payload      String   // JSON de devengados/deducidos
+  status       String   @default("generated") // generated | pending | validated | error
+  providerRef  String?
+  errorMsg     String?
+  issuedAt     DateTime?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+
+  @@index([propertyId, periodId])
+}
+
 // PILA / seguridad social (§23): planilla de aportes derivada de un periodo.
 model PilaFile {
   id                 String   @id @default(cuid())

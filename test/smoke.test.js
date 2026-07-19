@@ -779,6 +779,34 @@ async function main() {
       assert.equal(data.status, 'paid');
     });
 
+    // ===== Ola 2: Nómina electrónica DIAN (§22) =====
+    await test('generar documento soporte de nómina electrónica (periodo cerrado)', async () => {
+      const { status, data } = await hr('/api/hr/electronic-payroll/generate', { method: 'POST', body: { periodId } });
+      assert.equal(status, 201);
+      assert.ok(data.generated >= 3, 'un documento por empleado liquidado');
+      const list = await hr(`/api/hr/electronic-payroll?propertyId=${propertyId}&periodId=${periodId}`);
+      assert.equal(list.data.providerConfigured, false);
+      const doc = list.data.documents.find(d => d.employeeName.includes('Pedro'));
+      assert.ok(doc && doc.net > 0 && doc.status === 'generated', 'documento con neto y estado generado');
+    });
+
+    await test('transmitir sin proveedor → numeración local en estado pending', async () => {
+      const { status, data } = await hr('/api/hr/electronic-payroll/transmit', { method: 'POST', body: { periodId } });
+      assert.equal(status, 200);
+      assert.ok(data.transmitted >= 3);
+      const list = await hr(`/api/hr/electronic-payroll?propertyId=${propertyId}&periodId=${periodId}`);
+      const doc = list.data.documents[0];
+      assert.equal(doc.status, 'pending');
+      assert.match(doc.fullNumber, /^NIE-\d+/);
+    });
+
+    await test('no permite generar nómina electrónica de un periodo no cerrado', async () => {
+      const now = new Date();
+      const pr = await hr('/api/hr/payroll/periods', { method: 'POST', body: { propertyId, year: now.getUTCFullYear(), month: (now.getUTCMonth() === 0 ? 12 : now.getUTCMonth()) } });
+      const gen = await hr('/api/hr/electronic-payroll/generate', { method: 'POST', body: { periodId: pr.data.id } });
+      assert.equal(gen.status, 400, 'debe exigir el cierre de la nómina primero');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

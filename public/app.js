@@ -1097,13 +1097,24 @@
   }
 
   async function viewPayroll() {
-    const [periods, employees, novelties, types, pilas] = await Promise.all([
+    const [periods, employees, novelties, types, pilas, nie] = await Promise.all([
       get(`/hr/payroll/periods?${pid()}`),
       get(`/hr/employees?${pid()}&status=active`),
       get(`/hr/novelties?${pid()}`),
       get('/hr/novelty-types'),
       get(`/hr/pila?${pid()}`).catch(() => []),
+      get(`/hr/electronic-payroll?${pid()}`).catch(() => ({ documents: [], providerConfigured: false })),
     ]);
+    window._nieGen = async () => {
+      const sel = $('#niePeriod').value;
+      if (!sel) return toast('Selecciona un periodo cerrado', true);
+      try { const { data } = await api('/hr/electronic-payroll/generate', { method: 'POST', body: { periodId: sel } }); toast(`${data.generated} documento(s) generado(s)`); render(); }
+      catch (err) { toast(err.message, true); }
+    };
+    window._nieTx = async periodId => {
+      try { const { data } = await api('/hr/electronic-payroll/transmit', { method: 'POST', body: { periodId } }); toast(data.providerConfigured ? `${data.transmitted} transmitido(s)` : `${data.transmitted} numerado(s) localmente (sin proveedor DIAN)`); render(); }
+      catch (err) { toast(err.message, true); }
+    };
     window._preparePila = async () => {
       const sel = $('#pilaPeriod').value;
       if (!sel) return toast('Selecciona un periodo', true);
@@ -1236,6 +1247,19 @@
               ${p.status !== 'paid' ? `<button class="btn small" onclick="_pilaPay('${p.id}')">Registrar pago</button>` : ''}</td>
         </tr>`).join('')}</table>
         ${pilas.length ? '' : '<p class="muted">Aún no hay planillas PILA.</p>'}
+      </div>
+      <div class="card"><h3>Nómina electrónica DIAN
+        ${nie.providerConfigured ? badge('Proveedor conectado', 'green') : badge('Sin proveedor — modo local', 'yellow')}</h3>
+        <p class="muted" style="font-size:12.5px">Genera el documento soporte de pago por empleado desde un periodo cerrado. Sin proveedor DIAN, se numera localmente y queda listo para transmitir.</p>
+        <div class="row">
+          <div><label>Generar desde periodo cerrado</label><select id="niePeriod"><option value="">—</option>${periods.filter(p => p.status === 'closed').map(p => `<option value="${p.id}">${p.month}/${p.year}</option>`).join('')}</select></div>
+          <button class="btn fit" onclick="_nieGen()">Generar documentos</button>
+        </div>
+        ${nie.documents.length ? `<table class="mt"><tr><th>Número</th><th>Empleado</th><th>Devengado</th><th>Deducido</th><th>Neto</th><th>Estado</th></tr>
+          ${nie.documents.map(d => `<tr><td>${esc(d.fullNumber || '(borrador)')}</td><td>${esc(d.employeeName)}</td><td>${cop(d.earned)}</td><td>${cop(d.deductions)}</td><td><b>${cop(d.net)}</b></td><td>${sb(d.status === 'validated' ? 'confirmed' : d.status === 'error' ? 'open' : d.status === 'pending' ? 'pending' : 'active')} ${esc(d.status)}</td></tr>`).join('')}
+          </table>
+          ${nie.documents.some(d => d.status === 'generated') ? `<button class="btn small mt" onclick="_nieTx('${nie.documents.find(d => d.status === 'generated').periodId}')">Transmitir generados</button>` : ''}`
+          : '<p class="muted mt">Aún no hay documentos de nómina electrónica.</p>'}
       </div>`;
   }
 

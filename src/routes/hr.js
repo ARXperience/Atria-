@@ -6,6 +6,7 @@ import { calculatePeriod, closePeriod, simulateLiquidation, noveltyTypes } from 
 import { createDraftContract, renderContractText } from '../services/contracts.js';
 import { createShift, clockIn, clockOut } from '../services/shifts.js';
 import { preparePila, registerPilaPayment, pilaCsv } from '../services/pila.js';
+import { generateElectronicPayroll, transmitElectronicPayroll, nominaProviderConfigured } from '../services/electronicPayroll.js';
 import { requestApproval } from '../services/approvals.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, fmtCOP } from '../lib/util.js';
@@ -259,6 +260,36 @@ hrRouter.post('/attendance/clock', requirePermission('hr.create'), async (req, r
       ? await clockIn({ propertyId, employeeId, at: at || null })
       : await clockOut({ propertyId, employeeId, at: at || null });
     res.status(201).json(result);
+  } catch (err) { badRequest(res, err.message); }
+});
+
+// ---- Nómina electrónica DIAN (§22) ----
+hrRouter.get('/electronic-payroll', requirePermission('payroll.view'), async (req, res) => {
+  const { propertyId, periodId } = req.query;
+  if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const where = { propertyId };
+  if (periodId) where.periodId = periodId;
+  const docs = await prisma.electronicPayrollDocument.findMany({ where, orderBy: { createdAt: 'desc' }, take: 300 });
+  res.json({ providerConfigured: nominaProviderConfigured(), documents: docs });
+});
+
+hrRouter.post('/electronic-payroll/generate', requirePermission('payroll.manage'), async (req, res) => {
+  const { periodId } = req.body || {};
+  const period = await prisma.payrollPeriod.findUnique({ where: { id: periodId } });
+  if (!period || !propertyScope(req, period.propertyId)) return res.status(404).json({ error: 'Periodo no encontrado' });
+  try {
+    const count = await generateElectronicPayroll(periodId, { user: req.user });
+    res.status(201).json({ generated: count });
+  } catch (err) { badRequest(res, err.message); }
+});
+
+hrRouter.post('/electronic-payroll/transmit', requirePermission('payroll.manage'), async (req, res) => {
+  const { periodId } = req.body || {};
+  const period = await prisma.payrollPeriod.findUnique({ where: { id: periodId } });
+  if (!period || !propertyScope(req, period.propertyId)) return res.status(404).json({ error: 'Periodo no encontrado' });
+  try {
+    const count = await transmitElectronicPayroll(periodId, { user: req.user });
+    res.json({ transmitted: count, providerConfigured: nominaProviderConfigured() });
   } catch (err) { badRequest(res, err.message); }
 });
 
