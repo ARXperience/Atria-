@@ -29,6 +29,7 @@ import { financeRouter } from './routes/finance.js';
 import { dataProtectionRouter } from './routes/dataProtection.js';
 import { fonturRouter } from './routes/fontur.js';
 import { portfolioRouter } from './routes/portfolio.js';
+import { marketingRouter } from './routes/marketing.js';
 import { miscRouter } from './routes/misc.js';
 import { publicRouter } from './routes/public.js';
 import { registerAutomations } from './services/automations.js';
@@ -81,6 +82,7 @@ app.use('/api/finance', authRequired, financeRouter);
 app.use('/api/dataprotection', authRequired, dataProtectionRouter);
 app.use('/api/fontur', authRequired, fonturRouter);
 app.use('/api/portfolio', authRequired, portfolioRouter);
+app.use('/api/marketing', authRequired, marketingRouter);
 app.use('/api', authRequired, miscRouter);
 
 // Frontend estático: panel admin + página de pago + portal huésped

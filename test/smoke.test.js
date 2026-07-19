@@ -1270,6 +1270,63 @@ async function main() {
       assert.ok(bog.monthRevenue > 0, 'la sede operada durante las pruebas debe tener ingresos');
     });
 
+    // ===== Marketing & campañas (§36) =====
+    await test('canal inválido de campaña se rechaza', async () => {
+      const c = await api('/api/marketing/campaigns', { method: 'POST', body: { propertyId, name: 'X', channel: 'paloma', message: 'hola' } });
+      assert.equal(c.status, 400);
+    });
+
+    await test('campaña sin mensaje se rechaza', async () => {
+      const c = await api('/api/marketing/campaigns', { method: 'POST', body: { propertyId, name: 'X', channel: 'email' } });
+      assert.equal(c.status, 400);
+    });
+
+    await test('la audiencia de marketing respeta el consentimiento', async () => {
+      // Huésped contactable sin consentimiento de marketing
+      const mkIn = futureDay(120), mkOut = futureDay(122);
+      const { data: avail } = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: mkIn, checkOut: mkOut, adults: 1 } });
+      await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: mkIn, checkOut: mkOut, adults: 1, roomTypeId: avail[0].roomTypeId, ratePlanId: avail[0].ratePlans[0]?.ratePlanId, guest: { fullName: 'Marta Correo', email: 'marta@example.com', phone: '573009998877', documentNumber: '900900900', nationality: 'CO' } } });
+      const list = await api(`/api/reservations?propertyId=${propertyId}`);
+      const g = list.data.map(r => r.guest).find(x => x && x.email === 'marta@example.com');
+      assert.ok(g, 'debe existir el huésped creado');
+      assert.equal(g.marketingConsent, false);
+      const before = await api(`/api/marketing/audience?propertyId=${propertyId}&channel=email&audience=guests`);
+      // Otorga consentimiento de marketing → sincroniza la ficha del huésped
+      const cons = await api('/api/dataprotection/consents', { method: 'POST', body: { propertyId, subjectType: 'guest', subjectId: g.id, subjectName: g.fullName, purpose: 'marketing' } });
+      assert.equal(cons.status, 201);
+      const after = await api(`/api/marketing/audience?propertyId=${propertyId}&channel=email&audience=guests`);
+      assert.equal(after.data.eligible, before.data.eligible + 1, 'el huésped con consentimiento entra a la audiencia');
+    });
+
+    let campaignId;
+    await test('crear campaña calcula la audiencia elegible', async () => {
+      const c = await api('/api/marketing/campaigns', { method: 'POST', body: { propertyId, name: 'Promo julio', channel: 'email', audience: 'guests', subject: '¡Vuelve!', message: 'Tenemos una tarifa especial para ti.' } });
+      assert.equal(c.status, 201);
+      campaignId = c.data.id;
+      assert.equal(c.data.status, 'draft');
+      assert.ok(c.data.audienceCount >= 1, 'debe incluir al huésped con consentimiento');
+    });
+
+    await test('enviar campaña solo alcanza a quienes consintieron', async () => {
+      const sent = await api(`/api/marketing/campaigns/${campaignId}/send`, { method: 'POST' });
+      assert.equal(sent.status, 200);
+      assert.equal(sent.data.status, 'sent');
+      assert.equal(sent.data.sentCount, sent.data.audienceCount);
+      assert.ok(sent.data.sentAt);
+    });
+
+    await test('no se puede reenviar una campaña ya enviada', async () => {
+      const again = await api(`/api/marketing/campaigns/${campaignId}/send`, { method: 'POST' });
+      assert.equal(again.status, 400);
+    });
+
+    await test('overview de marketing reporta opt-in y envíos', async () => {
+      const { status, data } = await api(`/api/marketing/overview?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(data.reachable >= 1);
+      assert.ok(data.campaignsSent >= 1 && data.totalSent >= 1);
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

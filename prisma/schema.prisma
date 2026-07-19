@@ -1235,3 +1235,28 @@ model FonturContribution {
 
   @@unique([propertyId, period])
 }
+
+// ===== Marketing & campañas (§36) =====
+// Campañas segmentadas por canal; el envío respeta el consentimiento de
+// marketing del titular (§26) — no se contacta a quien no lo autorizó.
+model Campaign {
+  id            String   @id @default(cuid())
+  propertyId    String
+  name          String
+  channel       String   @default("email") // email | whatsapp | sms
+  audience      String   @default("guests") // guests | leads
+  segment       String?  // JSON con criterios (ciudad, etapa, etiqueta…)
+  subject       String?
+  message       String
+  status        String   @default("draft") // draft | scheduled | sent | cancelled
+  scheduledAt   DateTime?
+  sentAt        DateTime?
+  audienceCount Int      @default(0)
+  sentCount     Int      @default(0)
+  skippedNoConsent Int   @default(0)
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([propertyId, status])
+}

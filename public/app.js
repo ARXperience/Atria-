@@ -164,6 +164,7 @@
     ['sep', 'Comercial'],
     ['inbox', '💬 Inbox / WhatsApp'],
     ['crm', '👥 CRM'],
+    ['marketing', '📣 Marketing'],
     ['payments', '💳 Pagos'],
     ['invoices', '🧾 Facturación'],
     ['sep', 'IA & Contenido'],
@@ -1290,6 +1291,70 @@
       </div>`;
   }
 
+  async function viewMarketing() {
+    const ov = await get(`/marketing/overview?${pid()}`);
+    const chLabel = { email: '✉️ Email', whatsapp: '💬 WhatsApp', sms: '📱 SMS' };
+    const stLabel = { draft: 'Borrador', scheduled: 'Programada', sent: 'Enviada', cancelled: 'Cancelada' };
+    window._mkPreview = async () => {
+      try {
+        const a = await api(`/marketing/audience?${pid()}&channel=${$('#mkChannel').value}&audience=${$('#mkAud').value}`);
+        $('#mkAudInfo').innerHTML = `Audiencia elegible: <b>${a.eligible}</b>${a.skippedNoConsent ? ` · <span style="color:var(--yellow)">${a.skippedNoConsent} sin consentimiento (omitidos)</span>` : ''}`;
+      } catch (e) { toast(e.message, true); }
+    };
+    window._mkCreate = async send => {
+      try {
+        const c = await api('/marketing/campaigns', { method: 'POST', body: { propertyId: state.propertyId, name: $('#mkName').value, channel: $('#mkChannel').value, audience: $('#mkAud').value, subject: $('#mkSubject').value || null, message: $('#mkMsg').value } });
+        if (send) await api(`/marketing/campaigns/${c.id}/send`, { method: 'POST' });
+        toast(send ? 'Campaña enviada' : 'Campaña guardada'); render();
+      } catch (e) { toast(e.message, true); }
+    };
+    window._mkSend = async id => { if (!confirm('¿Enviar esta campaña ahora? Solo llegará a quienes dieron consentimiento.')) return; try { await api(`/marketing/campaigns/${id}/send`, { method: 'POST' }); toast('Campaña enviada'); render(); } catch (e) { toast(e.message, true); } };
+    window._mkCancel = async id => { try { await api(`/marketing/campaigns/${id}/cancel`, { method: 'POST' }); toast('Campaña cancelada'); render(); } catch (e) { toast(e.message, true); } };
+    setTimeout(animateCounts, 0);
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Contactables (opt-in)</div><div class="value" style="color:var(--green)"><span data-count="${ov.reachable}">0</span></div></div>
+        <div class="kpi"><div class="label">Tasa de opt-in</div><div class="value"><span data-count="${ov.optInRate}" data-fmt="pct">0%</span></div></div>
+        <div class="kpi"><div class="label">Campañas enviadas</div><div class="value"><span data-count="${ov.campaignsSent}">0</span></div></div>
+        <div class="kpi"><div class="label">Mensajes enviados</div><div class="value"><span data-count="${ov.totalSent}">0</span></div></div>
+      </div>
+
+      <div class="grid cols-2 mt">
+        <div class="card"><h3>Nueva campaña</h3>
+          <div><label>Nombre</label><input id="mkName" placeholder="Promo temporada baja"></div>
+          <div class="row mt">
+            <div><label>Canal</label><select id="mkChannel" onchange="_mkPreview()"><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="sms">SMS</option></select></div>
+            <div><label>Audiencia</label><select id="mkAud" onchange="_mkPreview()"><option value="guests">Huéspedes</option><option value="leads">Leads</option></select></div>
+          </div>
+          <div class="mt"><label>Asunto (email)</label><input id="mkSubject" placeholder="Opcional"></div>
+          <div class="mt"><label>Mensaje</label><textarea id="mkMsg" rows="4" placeholder="Escribe el contenido de la campaña…"></textarea></div>
+          <p class="muted mt" id="mkAudInfo" style="font-size:12.5px">Selecciona canal y audiencia para estimar el alcance.</p>
+          <div class="row mt">
+            <button class="btn ghost" onclick="_mkCreate(false)">Guardar borrador</button>
+            <button class="btn" onclick="_mkCreate(true)">Crear y enviar</button>
+          </div>
+        </div>
+        <div class="card"><h3>Cumplimiento</h3>
+          <p class="muted">Las campañas de marketing solo se envían a titulares con <b>consentimiento vigente</b> (Habeas Data, §26). Quienes lo revocaron quedan automáticamente excluidos y se contabilizan como omitidos.</p>
+          <div class="mt" style="padding:14px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2)">
+            <div class="label">Base de huéspedes contactable</div>
+            <div style="font-size:26px;font-weight:700;color:var(--green)">${ov.reachable}</div>
+            <div class="muted" style="font-size:12px">${ov.optInRate}% de la base autorizó recibir comunicaciones.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mt"><h3>Campañas</h3>
+        ${ov.campaigns.length ? `<table><tr><th>Campaña</th><th>Canal</th><th>Audiencia</th><th>Alcance</th><th>Enviados</th><th>Estado</th><th></th></tr>
+        ${ov.campaigns.map(c => `<tr><td><b>${esc(c.name)}</b></td><td>${chLabel[c.channel] || esc(c.channel)}</td><td>${c.audience === 'leads' ? 'Leads' : 'Huéspedes'}</td>
+          <td>${c.audienceCount}${c.skippedNoConsent ? ` <span class="muted" title="omitidos sin consentimiento">(−${c.skippedNoConsent})</span>` : ''}</td>
+          <td>${c.status === 'sent' ? `<b style="color:var(--green)">${c.sentCount}</b>` : '—'}</td>
+          <td>${sb(c.status === 'sent' ? 'done' : c.status === 'cancelled' ? 'cancelled' : c.status === 'scheduled' ? 'prepared' : 'pending')} ${stLabel[c.status] || esc(c.status)}</td>
+          <td>${['draft', 'scheduled'].includes(c.status) ? `<button class="btn small" onclick="_mkSend('${c.id}')">Enviar</button> <button class="btn small ghost" onclick="_mkCancel('${c.id}')">Cancelar</button>` : ''}</td>
+        </tr>`).join('')}</table>` : '<p class="muted">Aún no hay campañas. Crea la primera arriba.</p>'}
+      </div>`;
+  }
+
   async function viewChannels() {
     const [ov, channels, catalog, mappings, logs, types] = await Promise.all([
       get(`/channels/overview?${pid()}`),
@@ -2016,6 +2081,7 @@
     booking: ['Nueva reserva', viewBooking],
     inbox: ['Inbox omnicanal', viewInbox],
     crm: ['CRM — Leads', viewCrm],
+    marketing: ['Marketing & campañas', viewMarketing],
     housekeeping: ['Housekeeping', viewHousekeeping],
     maintenance: ['Mantenimiento', viewMaintenance],
     payments: ['Pagos y links', viewPayments],
