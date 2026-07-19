@@ -4,6 +4,7 @@ import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
 import { calculatePeriod, closePeriod, simulateLiquidation, noveltyTypes } from '../services/payroll.js';
 import { createDraftContract, renderContractText } from '../services/contracts.js';
+import { createShift, clockIn, clockOut } from '../services/shifts.js';
 import { requestApproval } from '../services/approvals.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, fmtCOP } from '../lib/util.js';
@@ -219,6 +220,45 @@ hrRouter.post('/contracts/:id/amendments', requirePermission('hr.manage'), async
     requiredRole: 'HR', user: req.user,
   });
   res.status(202).json({ pendingApproval: approval });
+});
+
+// ---- Turnos y asistencia (§21) ----
+hrRouter.get('/shifts', requirePermission('hr.view'), async (req, res) => {
+  const { propertyId, from, to } = req.query;
+  if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const where = { propertyId };
+  if (from) where.date = { gte: new Date(from) };
+  if (to) where.date = { ...(where.date || {}), lte: new Date(to) };
+  res.json(await prisma.shiftAssignment.findMany({ where, include: { employee: { select: { fullName: true } } }, orderBy: { date: 'asc' }, take: 300 }));
+});
+
+hrRouter.post('/shifts', requirePermission('hr.manage'), async (req, res) => {
+  const { propertyId, employeeId, date, startTime, endTime, area, notes } = req.body || {};
+  if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  if (!employeeId || !date || !startTime || !endTime) return badRequest(res, 'employeeId, date, startTime y endTime requeridos');
+  try {
+    res.status(201).json(await createShift({ propertyId, employeeId, date, startTime, endTime, area, notes, createdBy: req.user.name }));
+  } catch (err) { badRequest(res, err.message); }
+});
+
+hrRouter.get('/attendance', requirePermission('hr.view'), async (req, res) => {
+  const { propertyId, date } = req.query;
+  if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const where = { propertyId };
+  if (date) where.date = new Date(date);
+  res.json(await prisma.attendanceRecord.findMany({ where, include: { employee: { select: { fullName: true } } }, orderBy: { clockIn: 'desc' }, take: 200 }));
+});
+
+hrRouter.post('/attendance/clock', requirePermission('hr.create'), async (req, res) => {
+  const { propertyId, employeeId, type, at } = req.body || {};
+  if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  if (!employeeId || !['in', 'out'].includes(type)) return badRequest(res, 'employeeId y type (in|out) requeridos');
+  try {
+    const result = type === 'in'
+      ? await clockIn({ propertyId, employeeId, at: at || null })
+      : await clockOut({ propertyId, employeeId, at: at || null });
+    res.status(201).json(result);
+  } catch (err) { badRequest(res, err.message); }
 });
 
 // Simulador de liquidación (sección 24)

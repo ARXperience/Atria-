@@ -150,6 +150,7 @@
     ['agent', '🤖 Agente IA'],
     ['sep', 'Personas'],
     ['employees', '👔 Empleados'],
+    ['shifts', '📆 Turnos'],
     ['payroll', '💰 Nómina'],
     ['sep', 'Gobierno'],
     ['approvals', '✅ Aprobaciones'],
@@ -1017,6 +1018,63 @@
       </table>${employees.length ? '' : '<p class="muted">Sin empleados registrados.</p>'}</div>`;
   }
 
+  async function viewShifts() {
+    const today = new Date().toISOString().slice(0, 10);
+    const [employees, shifts, attendance] = await Promise.all([
+      get(`/hr/employees?${pid()}&status=active`),
+      get(`/hr/shifts?${pid()}&from=${today}`),
+      get(`/hr/attendance?${pid()}&date=${today}`),
+    ]);
+    window._addShift = async () => {
+      try {
+        await api('/hr/shifts', { method: 'POST', body: { propertyId: state.propertyId, employeeId: $('#shEmp').value, date: $('#shDate').value, startTime: $('#shStart').value, endTime: $('#shEnd').value, area: $('#shArea').value } });
+        toast('Turno asignado'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._clock = async type => {
+      try {
+        const { data } = await api('/hr/attendance/clock', { method: 'POST', body: { propertyId: state.propertyId, employeeId: $('#atEmp').value, type } });
+        toast(type === 'in' ? 'Entrada registrada' : `Salida registrada${data.noveltiesCreated ? ` · ${data.noveltiesCreated} novedad(es) generada(s)` : ''}`);
+        render();
+      } catch (err) { toast(err.message, true); }
+    };
+    const empOpts = employees.map(e => `<option value="${e.id}">${esc(e.fullName)}</option>`).join('');
+    return `
+      <div class="grid cols-2">
+        <div class="card"><h3>Planear turno (cuadrante)</h3>
+          <div class="row">
+            <div><label>Empleado</label><select id="shEmp">${empOpts}</select></div>
+            <div><label>Fecha</label><input id="shDate" type="date" value="${today}"></div>
+          </div>
+          <div class="row">
+            <div><label>Entrada</label><input id="shStart" value="14:00"></div>
+            <div><label>Salida</label><input id="shEnd" value="22:00"></div>
+            <div><label>Área</label><input id="shArea" placeholder="recepción"></div>
+          </div>
+          <button class="btn mt" onclick="_addShift()">Asignar turno</button>
+        </div>
+        <div class="card"><h3>Marcación de asistencia</h3>
+          <p class="muted" style="font-size:12.5px">La salida calcula horas, recargo nocturno y horas extra, y crea las novedades de nómina automáticamente.</p>
+          <label>Empleado</label><select id="atEmp">${empOpts}</select>
+          <div class="row mt">
+            <button class="btn fit" onclick="_clock('in')">▶️ Entrada</button>
+            <button class="btn secondary fit" onclick="_clock('out')">⏹️ Salida</button>
+          </div>
+        </div>
+      </div>
+      <div class="card"><h3>Asistencia de hoy</h3>
+        ${attendance.length ? `<table><tr><th>Empleado</th><th>Entrada</th><th>Salida</th><th>Horas</th><th>Nocturnas</th><th>Extras</th></tr>
+          ${attendance.map(a => `<tr><td>${esc(a.employee.fullName)}</td><td>${dt(a.clockIn)}</td><td>${a.clockOut ? dt(a.clockOut) : badge('abierta', 'yellow')}</td>
+          <td>${a.hoursWorked ?? '—'}</td><td>${a.nightHours ? badge(a.nightHours + ' h', 'blue') : '—'}</td><td>${a.overtimeHours ? badge(a.overtimeHours + ' h', 'yellow') : '—'}</td></tr>`).join('')}</table>`
+          : '<p class="muted">Sin marcaciones hoy.</p>'}
+      </div>
+      <div class="card"><h3>Turnos programados</h3>
+        ${shifts.length ? `<table><tr><th>Fecha</th><th>Empleado</th><th>Horario</th><th>Área</th></tr>
+          ${shifts.map(s => `<tr><td>${day(s.date)}</td><td>${esc(s.employee.fullName)}</td><td>${esc(s.startTime)} – ${esc(s.endTime)}</td><td>${esc(s.area || '—')}</td></tr>`).join('')}</table>`
+          : '<p class="muted">Sin turnos programados.</p>'}
+      </div>`;
+  }
+
   async function viewPayroll() {
     const [periods, employees, novelties, types] = await Promise.all([
       get(`/hr/payroll/periods?${pid()}`),
@@ -1327,6 +1385,7 @@
     content: ['Habitaciones y base de conocimiento', viewContent],
     agent: ['Agente IA — persona y comportamiento', viewAgent],
     employees: ['Empleados (Atria People)', viewEmployees],
+    shifts: ['Turnos y asistencia', viewShifts],
     payroll: ['Nómina colombiana', viewPayroll],
     approvals: ['Aprobaciones humanas', viewApprovals],
     compliance: ['Cumplimiento (RNT · TRA · SIRE)', viewCompliance],

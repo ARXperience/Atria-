@@ -719,6 +719,41 @@ async function main() {
       assert.equal(emps.find(e => e.id === employeeId).salary, 2100000);
     });
 
+    // ===== Ola 2: Turnos y asistencia (§21) =====
+    await test('planear turno (cuadrante)', async () => {
+      const { status } = await hr('/api/hr/shifts', { method: 'POST', body: { propertyId, employeeId, date: futureDay(1), startTime: '14:00', endTime: '22:00', area: 'recepción' } });
+      assert.equal(status, 201);
+      const list = await hr(`/api/hr/shifts?propertyId=${propertyId}&from=${futureDay(0)}`);
+      assert.ok(list.data.length >= 1);
+    });
+
+    await test('marcación: entrada + salida nocturna genera recargo y hora extra', async () => {
+      // Turno de 21:00 a 06:00 (9h): todo nocturno + 1h extra sobre jornada estándar de 8h
+      const day0 = futureDay(2);
+      const cin = await hr('/api/hr/attendance/clock', { method: 'POST', body: { propertyId, employeeId, type: 'in', at: `${day0}T21:00:00Z` } });
+      assert.equal(cin.status, 201);
+      const cout = await hr('/api/hr/attendance/clock', { method: 'POST', body: { propertyId, employeeId, type: 'out', at: `${futureDay(3)}T06:00:00Z` } });
+      assert.equal(cout.status, 201);
+      assert.equal(cout.data.attendance.hoursWorked, 9);
+      assert.equal(cout.data.attendance.nightHours, 9, 'las 9 horas son nocturnas');
+      assert.equal(cout.data.attendance.overtimeHours, 1, '1 hora extra sobre la jornada de 8h');
+      assert.equal(cout.data.noveltiesCreated, 2, 'debe crear novedad de recargo nocturno y de hora extra');
+    });
+
+    await test('las novedades automáticas llegan a nómina (pendientes de aprobación)', async () => {
+      const { data } = await hr(`/api/hr/novelties?propertyId=${propertyId}&status=pending`);
+      const mine = data.filter(n => n.employeeId === employeeId);
+      assert.ok(mine.some(n => n.type === 'night_surcharge'), 'debe existir la novedad de recargo nocturno');
+      assert.ok(mine.some(n => n.type === 'overtime_day'), 'debe existir la novedad de hora extra');
+    });
+
+    await test('no permite doble entrada sin salida', async () => {
+      const day0 = futureDay(4);
+      await hr('/api/hr/attendance/clock', { method: 'POST', body: { propertyId, employeeId, type: 'in', at: `${day0}T08:00:00Z` } });
+      const dup = await hr('/api/hr/attendance/clock', { method: 'POST', body: { propertyId, employeeId, type: 'in', at: `${day0}T09:00:00Z` } });
+      assert.equal(dup.status, 400, 'no debe permitir una segunda entrada abierta');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

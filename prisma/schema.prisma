@@ -536,9 +536,49 @@ model Employee {
   novelties      PayrollNovelty[]
   payrollItems   PayrollItem[]
   contracts      EmploymentContract[]
+  shifts         ShiftAssignment[]
+  attendance     AttendanceRecord[]
 
   @@unique([companyId, documentNumber])
   @@index([propertyId, status])
+}
+
+// Turnos / cuadrantes (§21)
+model ShiftAssignment {
+  id         String   @id @default(cuid())
+  propertyId String
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  date       DateTime
+  startTime  String   // "14:00"
+  endTime    String   // "22:00"
+  area       String?
+  notes      String?
+  status     String   @default("planned") // planned | done | absent
+  createdBy  String?
+  createdAt  DateTime @default(now())
+
+  @@index([propertyId, date])
+  @@index([employeeId, date])
+}
+
+// Marcación de asistencia (§21); al cerrar genera novedades de recargo/extra.
+model AttendanceRecord {
+  id            String   @id @default(cuid())
+  propertyId    String
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id])
+  date          DateTime
+  clockIn       DateTime
+  clockOut      DateTime?
+  hoursWorked   Float?
+  nightHours    Float?
+  overtimeHours Float?
+  source        String   @default("panel")
+  createdAt     DateTime @default(now())
+
+  @@index([propertyId, date])
+  @@index([employeeId, date])
 }
 
 // Contratos laborales (§20): documento formal, prórrogas y otrosíes.
