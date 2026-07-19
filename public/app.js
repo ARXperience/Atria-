@@ -40,6 +40,27 @@
     setTimeout(() => el.remove(), 2400);
   }
 
+  // Descarga/visualización de recursos protegidos (envía el token de sesión).
+  async function fetchBlob(path) {
+    const res = await fetch('/api' + path, { headers: state.token ? { authorization: 'Bearer ' + state.token } : {} });
+    if (!res.ok) throw new Error('No se pudo obtener el archivo');
+    return res.blob();
+  }
+  window._dl = async (path, filename) => {
+    try {
+      const url = URL.createObjectURL(await fetchBlob(path));
+      const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+    } catch (err) { toast(err.message, true); }
+  };
+  window._openDoc = async (path) => {
+    try {
+      const url = URL.createObjectURL(await fetchBlob(path));
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) { toast(err.message, true); }
+  };
+
   // Conteo animado para los KPIs con [data-count].
   function animateCounts(scope) {
     (scope || document).querySelectorAll('[data-count]').forEach(el => {
@@ -1076,12 +1097,34 @@
   }
 
   async function viewPayroll() {
-    const [periods, employees, novelties, types] = await Promise.all([
+    const [periods, employees, novelties, types, pilas] = await Promise.all([
       get(`/hr/payroll/periods?${pid()}`),
       get(`/hr/employees?${pid()}&status=active`),
       get(`/hr/novelties?${pid()}`),
       get('/hr/novelty-types'),
+      get(`/hr/pila?${pid()}`).catch(() => []),
     ]);
+    window._preparePila = async () => {
+      const sel = $('#pilaPeriod').value;
+      if (!sel) return toast('Selecciona un periodo', true);
+      try { await api('/hr/pila/prepare', { method: 'POST', body: { periodId: sel } }); toast('Planilla PILA preparada'); render(); }
+      catch (err) { toast(err.message, true); }
+    };
+    window._pilaPay = async id => {
+      const support = prompt('Referencia/soporte del pago PILA:');
+      if (support === null) return;
+      try { await api(`/hr/pila/${id}/payment`, { method: 'PATCH', body: { support } }); toast('Pago PILA registrado'); render(); }
+      catch (err) { toast(err.message, true); }
+    };
+    window._pilaView = pilas.length ? (id => {
+      const p = pilas.find(x => x.id === id);
+      modal(`<h2>PILA ${p.month}/${p.year} ${sb(p.status === 'paid' ? 'confirmed' : 'pending')}</h2>
+        <p class="muted" style="font-size:12.5px">${p.employeeCount} empleados · IBC total ${cop(p.totalIBC)} · Aportes ${cop(p.totalContributions)}</p>
+        ${p.inconsistencies.length ? `<p style="color:var(--yellow);font-size:12.5px">⚠ Afiliaciones faltantes: ${p.inconsistencies.map(i => esc(i.employee) + ' (' + i.missing.join(', ') + ')').join('; ')}</p>` : ''}
+        <table class="mt"><tr><th>Empleado</th><th>IBC</th><th>Salud</th><th>Pensión</th><th>ARL</th><th>CCF</th><th>Total</th></tr>
+        ${p.rows.map(r => `<tr><td>${esc(r.employee)}</td><td>${cop(r.ibc)}</td><td>${cop(r.salud)}</td><td>${cop(r.pension)}</td><td>${cop(r.arlAmt)}</td><td>${cop(r.ccf)}</td><td><b>${cop(r.total)}</b></td></tr>`).join('')}</table>
+        <button class="btn small secondary mt" onclick="_dl('/hr/pila/${p.id}/export','PILA-${p.month}-${p.year}.csv')">Descargar CSV</button>`);
+    }) : null;
     const now = new Date();
     window._createPeriod = async () => {
       try {
@@ -1178,6 +1221,21 @@
           <td>${n.status === 'pending' ? `<button class="btn small" onclick="_decideNov('${n.id}',true)">Aprobar</button>
             <button class="btn small danger" onclick="_decideNov('${n.id}',false)">Rechazar</button>` : ''}</td>
         </tr>`).join('')}</table>
+      </div>
+      <div class="card"><h3>PILA — seguridad social</h3>
+        <p class="muted" style="font-size:12.5px">La planilla se arma desde el IBC y los aportes que la nómina ya calculó. Presentar y pagar es una acción humana.</p>
+        <div class="row">
+          <div><label>Preparar desde periodo</label><select id="pilaPeriod"><option value="">—</option>${periods.filter(p => p.status !== 'open').map(p => `<option value="${p.id}">${p.month}/${p.year}</option>`).join('')}</select></div>
+          <button class="btn fit" onclick="_preparePila()">Preparar planilla</button>
+        </div>
+        <table class="mt"><tr><th>Periodo</th><th>Empleados</th><th>IBC total</th><th>Aportes</th><th>Estado</th><th></th></tr>
+        ${pilas.map(p => `<tr>
+          <td><b>${p.month}/${p.year}</b></td><td>${p.employeeCount}</td><td>${cop(p.totalIBC)}</td><td>${cop(p.totalContributions)}</td>
+          <td>${sb(p.status === 'paid' ? 'confirmed' : 'pending')} ${p.status === 'paid' ? 'pagada' : 'preparada'}${p.inconsistencies.length ? ' ' + badge('⚠ afiliaciones', 'yellow') : ''}</td>
+          <td><button class="btn small secondary" onclick="_pilaView('${p.id}')">Ver</button>
+              ${p.status !== 'paid' ? `<button class="btn small" onclick="_pilaPay('${p.id}')">Registrar pago</button>` : ''}</td>
+        </tr>`).join('')}</table>
+        ${pilas.length ? '' : '<p class="muted">Aún no hay planillas PILA.</p>'}
       </div>`;
   }
 
@@ -1251,7 +1309,7 @@
           <td>${esc(d.title)}<div class="muted" style="font-size:11px">${esc(d.fileName)}</div></td>
           <td>${LEGAL.includes(d.docType) ? badge(d.docType, 'blue') : esc(d.docType)}</td>
           <td>v${d.version}</td><td>${expiryBadge(d)}</td><td class="muted" style="font-size:12px">${dt(d.createdAt)}</td>
-          <td><a class="btn small secondary" href="/api/documents/${d.id}/download" target="_blank" style="text-decoration:none">Ver</a>
+          <td><button class="btn small secondary" onclick="_openDoc('/documents/${d.id}/download')">Ver</button>
               <button class="btn small danger" onclick="_delDoc('${d.id}',${LEGAL.includes(d.docType)})">Eliminar</button></td>
         </tr>`).join('')}
       </table>${docs.length ? '' : '<p class="muted">Sin documentos. Carga RUT, RNT, contratos, certificados y pólizas para controlar vencimientos.</p>'}</div>

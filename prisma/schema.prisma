@@ -663,6 +663,28 @@ model PayrollPeriod {
   @@unique([propertyId, year, month])
 }
 
+// PILA / seguridad social (§23): planilla de aportes derivada de un periodo.
+model PilaFile {
+  id                 String   @id @default(cuid())
+  companyId          String
+  propertyId         String
+  periodId           String   @unique
+  year               Int
+  month              Int
+  status             String   @default("prepared") // prepared | paid
+  employeeCount      Int
+  totalIBC           Float
+  totalContributions Float
+  rows               String   // JSON por empleado
+  inconsistencies    String?  // JSON de afiliaciones faltantes
+  paymentSupport     String?
+  paidAt             DateTime?
+  preparedBy         String?
+  createdAt          DateTime @default(now())
+
+  @@index([propertyId, year, month])
+}
+
 model PayrollItem {
   id         String   @id @default(cuid())
   periodId   String

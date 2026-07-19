@@ -5,6 +5,7 @@ import { propertyScope, requirePermission } from '../middleware/auth.js';
 import { calculatePeriod, closePeriod, simulateLiquidation, noveltyTypes } from '../services/payroll.js';
 import { createDraftContract, renderContractText } from '../services/contracts.js';
 import { createShift, clockIn, clockOut } from '../services/shifts.js';
+import { preparePila, registerPilaPayment, pilaCsv } from '../services/pila.js';
 import { requestApproval } from '../services/approvals.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, fmtCOP } from '../lib/util.js';
@@ -259,6 +260,40 @@ hrRouter.post('/attendance/clock', requirePermission('hr.create'), async (req, r
       : await clockOut({ propertyId, employeeId, at: at || null });
     res.status(201).json(result);
   } catch (err) { badRequest(res, err.message); }
+});
+
+// ---- PILA / seguridad social (§23) ----
+hrRouter.get('/pila', requirePermission('payroll.view'), async (req, res) => {
+  const { propertyId } = req.query;
+  if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const list = await prisma.pilaFile.findMany({ where: { propertyId }, orderBy: [{ year: 'desc' }, { month: 'desc' }] });
+  res.json(list.map(p => ({ ...p, rows: JSON.parse(p.rows), inconsistencies: p.inconsistencies ? JSON.parse(p.inconsistencies) : [] })));
+});
+
+hrRouter.post('/pila/prepare', requirePermission('payroll.manage'), async (req, res) => {
+  const { periodId } = req.body || {};
+  const period = await prisma.payrollPeriod.findUnique({ where: { id: periodId } });
+  if (!period || !propertyScope(req, period.propertyId)) return res.status(404).json({ error: 'Periodo no encontrado' });
+  try {
+    const pila = await preparePila(periodId, { user: req.user });
+    res.status(201).json({ ...pila, rows: JSON.parse(pila.rows), inconsistencies: pila.inconsistencies ? JSON.parse(pila.inconsistencies) : [] });
+  } catch (err) { badRequest(res, err.message); }
+});
+
+hrRouter.patch('/pila/:id/payment', requirePermission('payroll.manage'), async (req, res) => {
+  const pila = await prisma.pilaFile.findUnique({ where: { id: req.params.id } });
+  if (!pila || !propertyScope(req, pila.propertyId)) return res.status(404).json({ error: 'Planilla no encontrada' });
+  try {
+    res.json(await registerPilaPayment(pila.id, { support: req.body?.support, user: req.user }));
+  } catch (err) { badRequest(res, err.message); }
+});
+
+hrRouter.get('/pila/:id/export', requirePermission('payroll.view'), async (req, res) => {
+  const pila = await prisma.pilaFile.findUnique({ where: { id: req.params.id } });
+  if (!pila || !propertyScope(req, pila.propertyId)) return res.status(404).json({ error: 'Planilla no encontrada' });
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="PILA-${pila.month}-${pila.year}.csv"`);
+  res.end(pilaCsv(pila));
 });
 
 // Simulador de liquidación (sección 24)

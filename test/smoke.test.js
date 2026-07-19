@@ -754,6 +754,31 @@ async function main() {
       assert.equal(dup.status, 400, 'no debe permitir una segunda entrada abierta');
     });
 
+    // ===== Ola 2: PILA / seguridad social (§23) =====
+    let pilaId;
+    await test('preparar planilla PILA desde el periodo liquidado', async () => {
+      const { status, data } = await hr('/api/hr/pila/prepare', { method: 'POST', body: { periodId } });
+      assert.equal(status, 201);
+      pilaId = data.id;
+      assert.ok(data.employeeCount >= 3);
+      assert.ok(data.totalIBC > 0 && data.totalContributions > 0, 'debe traer IBC y aportes totales');
+      assert.ok(data.rows[0].salud > 0 && data.rows[0].pension > 0, 'cada empleado trae salud y pensión');
+    });
+
+    await test('exportar PILA a CSV', async () => {
+      const res = await fetch(`${BASE}/api/hr/pila/${pilaId}/export`, { headers: { authorization: `Bearer ${hrToken}` } });
+      assert.equal(res.status, 200);
+      const csv = await res.text();
+      assert.match(csv, /Documento,Empleado/);
+      assert.match(csv, /Pedro N[oó]mina Test/);
+    });
+
+    await test('registrar pago de PILA', async () => {
+      const { status, data } = await hr(`/api/hr/pila/${pilaId}/payment`, { method: 'PATCH', body: { support: 'REF-PILA-123' } });
+      assert.equal(status, 200);
+      assert.equal(data.status, 'paid');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {
