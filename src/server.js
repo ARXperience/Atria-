@@ -2,8 +2,9 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config } from './config.js';
+import { config, assertProductionConfig } from './config.js';
 import { logger } from './lib/logger.js';
+import { securityHeaders, rateLimit } from './middleware/security.js';
 import { prisma } from './db.js';
 import { authRequired } from './middleware/auth.js';
 import { authRouter } from './routes/auth.js';
@@ -43,12 +44,20 @@ import { resumeSavedSessions } from './services/whatsapp.js';
 import { checkExpiringDocuments } from './services/documents.js';
 import { runAllComplianceRules } from './services/rulesEngine.js';
 
+// Aborta el arranque si la configuración de producción es insegura (secretos por defecto).
+assertProductionConfig(logger);
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.set('trust proxy', true);
+app.disable('x-powered-by');
+app.use(securityHeaders);
 // rawBody se conserva para verificar firmas de webhooks (Stripe/Bold).
 // Límite alto para permitir carga de documentos en base64 (§43).
 app.use(express.json({ limit: '20mb', verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); } }));
+
+// Anti fuerza-bruta: limita intentos de acceso FALLIDOS por IP (no penaliza logins válidos).
+const loginLimiter = rateLimit({ windowMs: 15 * 60_000, max: 10, onlyFailures: true, message: 'Demasiados intentos de acceso fallidos. Espera unos minutos e intenta de nuevo.' });
 
 // Salud
 app.get('/api/health', async (_req, res) => {
@@ -64,6 +73,7 @@ app.get('/api/health', async (_req, res) => {
 app.use('/api/public', publicRouter);
 
 // Rutas autenticadas
+app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth', authRouter);
 app.use('/api/admin', authRequired, adminRouter);
 app.use('/api/booking', authRequired, bookingRouter);

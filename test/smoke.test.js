@@ -1597,6 +1597,25 @@ async function main() {
       assert.ok(!after.data.some(s => s.trigger === 'foreign_guest.detected' && s.actionType === sug.actionType), 'la sugerencia aplicada ya no debe aparecer');
     });
 
+    // ===== Endurecimiento para producción (§50) =====
+    await test('las respuestas incluyen cabeceras de seguridad', async () => {
+      const res = await fetch(`${BASE}/api/health`);
+      assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+      assert.equal(res.headers.get('x-frame-options'), 'DENY');
+      assert.ok(res.headers.get('referrer-policy'));
+      assert.ok(!res.headers.get('x-powered-by'), 'no debe exponer x-powered-by');
+    });
+
+    // DEBE ir al final: al superar el umbral bloquea la IP por 15 min.
+    await test('login se bloquea tras muchos intentos fallidos (anti fuerza-bruta)', async () => {
+      let got429 = false;
+      for (let i = 0; i < 15; i++) {
+        const res = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'gerente@atria.co', password: 'incorrecta' }) });
+        if (res.status === 429) { got429 = true; break; }
+      }
+      assert.ok(got429, 'tras varios intentos fallidos el login debe responder 429');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {
