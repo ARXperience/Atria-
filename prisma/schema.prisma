@@ -361,6 +361,7 @@ model Reservation {
   depositRequired Float @default(0)
   channel     String   @default("direct") // direct | whatsapp | web | walkin | ota
   channelRef  String?  // localizador externo (OTA)
+  corporateAccountId String?  // cuenta corporativa / agencia (§35)
   status      String   @default("tentative") // tentative | confirmed | checked_in | checked_out | cancelled | no_show | expired
   holdExpiresAt DateTime?
   notes       String?
@@ -1162,6 +1163,60 @@ model Lead {
   updatedAt   DateTime @updatedAt
 
   @@index([propertyId, stage])
+}
+
+// Cuenta corporativa / agencia con tarifa negociada y crédito (§35)
+model CorporateAccount {
+  id             String   @id @default(cuid())
+  propertyId     String
+  name           String
+  nit            String?  // NIT / identificación tributaria
+  contactName    String?
+  contactEmail   String?
+  contactPhone   String?
+  discountPct    Float    @default(0) // descuento negociado sobre tarifa (0..1)
+  creditEnabled  Boolean  @default(false)
+  creditLimit    Float    @default(0)
+  paymentTermsDays Int    @default(30)
+  status         String   @default("active") // active | suspended
+  notes          String?
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([propertyId, status])
+}
+
+// Rooming list: reserva de grupo con múltiples huéspedes/habitaciones (§35)
+model RoomingList {
+  id                 String   @id @default(cuid())
+  propertyId         String
+  corporateAccountId String?
+  name               String
+  checkIn            DateTime
+  checkOut           DateTime
+  roomTypeId         String
+  ratePlanId         String?
+  status             String   @default("draft") // draft | materialized | cancelled
+  notes              String?
+  createdBy          String?
+  createdAt          DateTime @default(now())
+  entries            RoomingEntry[]
+
+  @@index([propertyId, status])
+}
+
+model RoomingEntry {
+  id            String   @id @default(cuid())
+  roomingListId String
+  roomingList   RoomingList @relation(fields: [roomingListId], references: [id])
+  guestName     String
+  documentNumber String?
+  adults        Int      @default(1)
+  children      Int      @default(0)
+  reservationId String?  // se llena al materializar
+  status        String   @default("pending") // pending | reserved
+  createdAt     DateTime @default(now())
 }
 
 model Conversation {

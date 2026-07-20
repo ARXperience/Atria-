@@ -30,7 +30,7 @@ npm start                # http://localhost:4000
 > contraseñas tras el primer arranque, y usa correos reales. Nunca reutilices esta
 > contraseña en cuentas reales.
 
-**Pruebas end-to-end**: `npm test` (225 pruebas de los flujos críticos de la sección 48 del documento).
+**Pruebas end-to-end**: `npm test` (230 pruebas de los flujos críticos de la sección 48 del documento).
 
 ## 📱 Vincular WhatsApp (Baileys)
 

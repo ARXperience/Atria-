@@ -6,7 +6,7 @@ import { emitEvent } from '../lib/events.js';
 import { audit } from '../lib/audit.js';
 import { buildQuote } from './quote.js';
 import { findAvailability } from './availability.js';
-import { reservationCode } from '../lib/util.js';
+import { reservationCode, money } from '../lib/util.js';
 
 export async function upsertGuest({ propertyId, fullName, phone = null, email = null, documentType = null, documentNumber = null, nationality = 'CO' }) {
   let guest = null;
@@ -32,6 +32,7 @@ export async function upsertGuest({ propertyId, fullName, phone = null, email = 
 export async function createTentativeReservation({
   propertyId, guest, roomTypeId, ratePlanId = null, checkIn, checkOut,
   adults = 2, children = 0, channel = 'direct', createdBy = null, actor = 'human', notes = null,
+  discountPct = 0, corporateAccountId = null,
 }) {
   // Revalidar disponibilidad para evitar sobreventa
   const availability = await findAvailability({ propertyId, checkIn, checkOut, adults, children });
@@ -41,6 +42,15 @@ export async function createTentativeReservation({
   const quote = await buildQuote({ propertyId, roomTypeId, ratePlanId, checkIn, checkOut });
   const guestRecord = await upsertGuest({ propertyId, ...guest });
 
+  // Descuento negociado (cuenta corporativa / agencia): rebaja la tarifa y recalcula.
+  const pct = Math.min(Math.max(Number(discountPct) || 0, 0), 0.9);
+  const property = await prisma.property.findUnique({ where: { id: propertyId } });
+  const nightlyRate = money(quote.nightlyRate * (1 - pct));
+  const subtotal = money(nightlyRate * quote.nights);
+  const taxes = money(subtotal * (property?.taxRate || 0));
+  const total = money(subtotal + taxes);
+  const depositRequired = money(total * quote.depositPct);
+
   const holdExpiresAt = new Date(Date.now() + config.tentativeHoldHours * 3600000);
   const reservation = await prisma.reservation.create({
     data: {
@@ -48,10 +58,11 @@ export async function createTentativeReservation({
       propertyId, guestId: guestRecord.id, roomTypeId,
       ratePlanId: quote.ratePlanId,
       checkIn, checkOut, adults, children,
-      nights: quote.nights, nightlyRate: quote.nightlyRate,
-      subtotal: quote.subtotal, taxes: quote.taxes, total: quote.total,
-      depositRequired: quote.depositRequired,
+      nights: quote.nights, nightlyRate,
+      subtotal, taxes, total,
+      depositRequired,
       channel, status: 'tentative', holdExpiresAt, createdBy, notes,
+      corporateAccountId: corporateAccountId || null,
     },
     include: { guest: true },
   });

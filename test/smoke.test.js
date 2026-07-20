@@ -291,6 +291,61 @@ async function main() {
       assert.ok(a.lastServiceAt, 'registra la fecha del último servicio');
     });
 
+    // ===== Cuentas corporativas + rooming lists (§35) =====
+    let corpId, roomingId, corpRoomTypeId;
+    await test('crear cuenta corporativa con descuento negociado y crédito', async () => {
+      const { status, data } = await api('/api/crm/corporate', { method: 'POST', body: { propertyId, name: 'Constructora Andina S.A.S', nit: '900123456-7', contactName: 'Marta Ríos', discountPct: 0.2, creditEnabled: true, creditLimit: 20000000, paymentTermsDays: 45 } });
+      assert.equal(status, 201);
+      assert.equal(data.discountPct, 0.2);
+      assert.equal(data.creditEnabled, true);
+      corpId = data.id;
+    });
+
+    await test('crear un rooming list de grupo asociado a la cuenta', async () => {
+      const ci = futureDay(20), co = futureDay(22);
+      const av = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1 } });
+      corpRoomTypeId = av.data[0].roomTypeId;
+      const { status, data } = await api('/api/crm/rooming', { method: 'POST', body: {
+        propertyId, name: 'Congreso ANDI 2026', corporateAccountId: corpId,
+        checkIn: ci, checkOut: co, roomTypeId: corpRoomTypeId,
+        entries: [{ guestName: 'Ana Pérez' }, { guestName: 'Carlos Ruiz' }, { guestName: 'María Gómez' }],
+      } });
+      assert.equal(status, 201);
+      assert.equal(data.entries.length, 3);
+      assert.equal(data.status, 'draft');
+      roomingId = data.id;
+    });
+
+    await test('materializar el rooming list crea una reserva por huésped con la tarifa negociada', async () => {
+      // tarifa base de referencia
+      const q = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: futureDay(20), checkOut: futureDay(22), adults: 1 } });
+      const baseRate = q.data.find(o => o.roomTypeId === corpRoomTypeId)?.baseRate || q.data[0].baseRate;
+      const { status, data } = await api(`/api/crm/rooming/${roomingId}/materialize`, { method: 'POST' });
+      assert.equal(status, 200);
+      assert.equal(data.reserved, 3);
+      // verifica descuento aplicado en una de las reservas
+      const stmt = await api(`/api/crm/corporate/${corpId}/statement`);
+      assert.equal(stmt.data.reservations.length, 3, 'las 3 reservas quedan bajo la cuenta');
+      const full = await api(`/api/reservations?propertyId=${propertyId}&status=confirmed`);
+      const grpRes = full.data.filter(r => r.corporateAccountId === corpId);
+      assert.ok(grpRes.length >= 3, 'las reservas quedan ligadas a la cuenta');
+      assert.ok(grpRes[0].nightlyRate <= baseRate * 0.81, 'la tarifa lleva el 20% de descuento');
+    });
+
+    await test('el estado de cuenta consolida saldo y respeta el cupo de crédito', async () => {
+      const stmt = await api(`/api/crm/corporate/${corpId}/statement`);
+      assert.ok(stmt.data.totalBilled > 0);
+      assert.equal(stmt.data.totalPaid, 0, 'aún sin pagos');
+      assert.equal(stmt.data.balance, stmt.data.totalBilled);
+      assert.equal(stmt.data.overLimit, false, 'dentro del cupo');
+      assert.ok(stmt.data.creditAvailable < stmt.data.account.creditLimit, 'el cupo disponible bajó');
+    });
+
+    await test('re-materializar no duplica reservas', async () => {
+      const res = await api(`/api/crm/rooming/${roomingId}/materialize`, { method: 'POST' });
+      assert.equal(res.status, 400, 'no quedan huéspedes pendientes');
+    });
+
     // ===== Encuestas post-estadía + quejas (§37) =====
     await test('el check-out crea una encuesta post-estadía', async () => {
       await settle(400);

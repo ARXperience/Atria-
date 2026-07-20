@@ -3,10 +3,68 @@ import { Router } from 'express';
 import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
 import { guestRecall, getGuestMemory } from '../services/ai/memory.js';
+import { createCorporateAccount, updateCorporateAccount, listCorporateAccounts, accountStatement, createRoomingList, addRoomingEntry, getRoomingList, listRoomingLists, materializeRoomingList } from '../services/corporate.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, parseDay } from '../lib/util.js';
 
 export const crmRouter = Router();
+
+// ---- Cuentas corporativas / agencias (§35) ----
+crmRouter.get('/corporate', requirePermission('crm.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await listCorporateAccounts(req.query.propertyId, { status: req.query.status }));
+});
+
+crmRouter.post('/corporate', requirePermission('crm.create'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try { res.status(201).json(await createCorporateAccount({ ...req.body, user: req.user })); }
+  catch (err) { badRequest(res, err.message); }
+});
+
+crmRouter.patch('/corporate/:id', requirePermission('crm.edit'), async (req, res) => {
+  const acc = await prisma.corporateAccount.findUnique({ where: { id: req.params.id } });
+  if (!acc || !propertyScope(req, acc.propertyId)) return res.status(404).json({ error: 'Cuenta no encontrada' });
+  try { res.json(await updateCorporateAccount(acc.id, { ...req.body, user: req.user })); }
+  catch (err) { badRequest(res, err.message); }
+});
+
+crmRouter.get('/corporate/:id/statement', requirePermission('crm.view'), async (req, res) => {
+  const acc = await prisma.corporateAccount.findUnique({ where: { id: req.params.id } });
+  if (!acc || !propertyScope(req, acc.propertyId)) return res.status(404).json({ error: 'Cuenta no encontrada' });
+  res.json(await accountStatement(acc.id));
+});
+
+// ---- Rooming lists (§35) ----
+crmRouter.get('/rooming', requirePermission('crm.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await listRoomingLists(req.query.propertyId));
+});
+
+crmRouter.get('/rooming/:id', requirePermission('crm.view'), async (req, res) => {
+  const list = await getRoomingList(req.params.id);
+  if (!list || !propertyScope(req, list.propertyId)) return res.status(404).json({ error: 'Rooming list no encontrado' });
+  res.json(list);
+});
+
+crmRouter.post('/rooming', requirePermission('crm.create'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try { res.status(201).json(await createRoomingList({ ...req.body, user: req.user })); }
+  catch (err) { badRequest(res, err.message); }
+});
+
+crmRouter.post('/rooming/:id/entries', requirePermission('crm.edit'), async (req, res) => {
+  const list = await prisma.roomingList.findUnique({ where: { id: req.params.id } });
+  if (!list || !propertyScope(req, list.propertyId)) return res.status(404).json({ error: 'Rooming list no encontrado' });
+  try { res.status(201).json(await addRoomingEntry(list.id, req.body || {})); }
+  catch (err) { badRequest(res, err.message); }
+});
+
+crmRouter.post('/rooming/:id/materialize', requirePermission('reservations.create'), async (req, res) => {
+  const list = await prisma.roomingList.findUnique({ where: { id: req.params.id } });
+  if (!list || !propertyScope(req, list.propertyId)) return res.status(404).json({ error: 'Rooming list no encontrado' });
+  try { res.json(await materializeRoomingList(list.id, { user: req.user })); }
+  catch (err) { badRequest(res, err.message); }
+});
 
 // Memoria del huésped e historial (IA-5)
 crmRouter.get('/guests/:id/memory', requirePermission('guests.view'), async (req, res) => {

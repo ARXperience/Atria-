@@ -185,6 +185,7 @@
     ['sep', 'Comercial'],
     ['inbox', '💬 Inbox / WhatsApp'],
     ['crm', '👥 CRM'],
+    ['corporate', '🏢 Cuentas & grupos'],
     ['marketing', '📣 Marketing'],
     ['reputation', '⭐ Reputación'],
     ['events', '🎉 Eventos & salones'],
@@ -699,6 +700,102 @@
           <button class="btn small secondary" onclick="_leadStage('${l.id}','lost')">Perdido</button>` : ''}</td>
       </tr>`).join('')}
     </table>${leads.length ? '' : '<p class="muted">Sin leads. Se crean automáticamente desde WhatsApp/webchat.</p>'}</div>`;
+  }
+
+  async function viewCorporate() {
+    const [accounts, rooming, types] = await Promise.all([
+      get(`/crm/corporate?${pid()}`),
+      get(`/crm/rooming?${pid()}`),
+      get(`/admin/room-types?${pid()}`).catch(() => []),
+    ]);
+    window._coCreate = async () => {
+      try {
+        await api('/crm/corporate', { method: 'POST', body: {
+          propertyId: state.propertyId, name: $('#coName').value, nit: $('#coNit').value,
+          contactName: $('#coContact').value, contactEmail: $('#coEmail').value,
+          discountPct: (+$('#coDisc').value || 0) / 100, creditEnabled: $('#coCredit').checked,
+          creditLimit: +$('#coLimit').value || 0,
+        } });
+        toast('Cuenta creada'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._coStatement = async id => {
+      const s = await get(`/crm/corporate/${id}/statement`);
+      modal(`<h2>${esc(s.account.name)}</h2>
+        <div class="grid cols-4">
+          <div class="kpi"><div class="label">Facturado</div><div class="value">${cop(s.totalBilled)}</div></div>
+          <div class="kpi"><div class="label">Pagado</div><div class="value">${cop(s.totalPaid)}</div></div>
+          <div class="kpi"><div class="label">Saldo</div><div class="value" style="color:${s.balance > 0 ? 'var(--yellow)' : 'inherit'}">${cop(s.balance)}</div></div>
+          <div class="kpi"><div class="label">Cupo disponible</div><div class="value" style="color:${s.overLimit ? 'var(--red)' : 'inherit'}">${s.creditAvailable == null ? '—' : cop(s.creditAvailable)}</div></div>
+        </div>
+        ${s.overLimit ? `<p style="color:var(--red)">⚠️ La cuenta superó su cupo de crédito.</p>` : ''}
+        <table class="mt"><tr><th>Reserva</th><th>Huésped</th><th>Fechas</th><th>Estado</th><th>Total</th><th>Saldo</th></tr>
+          ${s.reservations.map(r => `<tr><td>${esc(r.code)}</td><td>${esc(r.guest)}</td><td class="muted" style="font-size:12px">${day(r.checkIn)}→${day(r.checkOut)}</td><td>${sb(r.status)}</td><td>${cop(r.total)}</td><td>${cop(r.balance)}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin reservas.</td></tr>'}
+        </table>`);
+    };
+    window._rlNew = () => {
+      const m = modal(`<h2>Nuevo rooming list</h2>
+        <div class="row">
+          <div style="flex:2"><label>Nombre del grupo *</label><input id="rlName" placeholder="Congreso ANDI 2026"></div>
+          <div><label>Cuenta corporativa</label><select id="rlAcc"><option value="">(ninguna)</option>${accounts.map(a => `<option value="${a.id}">${esc(a.name)} (${Math.round(a.discountPct * 100)}%)</option>`).join('')}</select></div>
+        </div>
+        <div class="row">
+          <div><label>Entrada *</label><input id="rlIn" type="date"></div>
+          <div><label>Salida *</label><input id="rlOut" type="date"></div>
+          <div><label>Tipo de habitación *</label><select id="rlType">${types.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></div>
+        </div>
+        <label>Huéspedes (uno por línea)</label>
+        <textarea id="rlGuests" rows="5" placeholder="Ana Pérez&#10;Carlos Ruiz&#10;María Gómez"></textarea>
+        <button class="btn mt" id="rlSave">Crear rooming list</button>`);
+      m.querySelector('#rlSave').onclick = async () => {
+        const entries = m.querySelector('#rlGuests').value.split('\n').map(s => s.trim()).filter(Boolean).map(guestName => ({ guestName }));
+        try {
+          await api('/crm/rooming', { method: 'POST', body: {
+            propertyId: state.propertyId, name: m.querySelector('#rlName').value,
+            corporateAccountId: m.querySelector('#rlAcc').value || null,
+            checkIn: m.querySelector('#rlIn').value, checkOut: m.querySelector('#rlOut').value,
+            roomTypeId: m.querySelector('#rlType').value, entries,
+          } });
+          toast('Rooming list creado'); m.remove(); render();
+        } catch (err) { toast(err.message, true); }
+      };
+    };
+    window._rlMat = async id => {
+      if (!confirm('Se creará una reserva confirmada por cada huésped pendiente. ¿Continuar?')) return;
+      try { const { data } = await api(`/crm/rooming/${id}/materialize`, { method: 'POST' }); toast(`${data.reserved}/${data.total} reservas creadas`); render(); }
+      catch (err) { toast(err.message, true); }
+    };
+    const stLabel = { draft: 'Borrador', materialized: 'Reservado', cancelled: 'Cancelado' };
+    const stColor = { draft: 'yellow', materialized: 'green', cancelled: 'gray' };
+    return `
+      <div class="card"><h3>🏢 Cuentas corporativas y agencias</h3>
+        <div class="row" style="align-items:flex-end;gap:10px">
+          <div><label>Nombre *</label><input id="coName" placeholder="Empresa XYZ S.A.S"></div>
+          <div><label>NIT</label><input id="coNit" placeholder="900.123.456-7"></div>
+          <div><label>Contacto</label><input id="coContact" placeholder="Nombre"></div>
+          <div><label>Email</label><input id="coEmail" type="email"></div>
+          <div style="max-width:110px"><label>Descuento %</label><input id="coDisc" type="number" placeholder="15"></div>
+          <div class="fit"><label style="display:inline">Crédito</label> <input type="checkbox" id="coCredit" style="width:auto"></div>
+          <div style="max-width:140px"><label>Cupo</label><input id="coLimit" type="number" placeholder="0"></div>
+          <button class="btn fit" onclick="_coCreate()">Crear</button>
+        </div>
+        ${accounts.length ? `<table class="mt"><tr><th>Cuenta</th><th>NIT</th><th>Descuento</th><th>Crédito</th><th>Estado</th><th></th></tr>
+          ${accounts.map(a => `<tr><td><b>${esc(a.name)}</b>${a.contactName ? `<div class="muted" style="font-size:11px">${esc(a.contactName)}</div>` : ''}</td>
+            <td class="muted">${esc(a.nit || '—')}</td><td>${Math.round(a.discountPct * 100)}%</td>
+            <td>${a.creditEnabled ? `${cop(a.creditLimit)} · ${a.paymentTermsDays}d` : '—'}</td>
+            <td>${badge(a.status === 'active' ? 'Activa' : 'Suspendida', a.status === 'active' ? 'green' : 'gray')}</td>
+            <td><button class="btn small secondary" onclick="_coStatement('${a.id}')">Estado de cuenta</button></td></tr>`).join('')}</table>` : '<p class="muted mt">Sin cuentas corporativas.</p>'}
+      </div>
+
+      <div class="card mt"><div style="display:flex;justify-content:space-between;align-items:center">
+        <h3>👥 Rooming lists (grupos)</h3><button class="btn small" onclick="_rlNew()">+ Nuevo grupo</button></div>
+        ${rooming.length ? `<table><tr><th>Grupo</th><th>Fechas</th><th>Huéspedes</th><th>Reservados</th><th>Estado</th><th></th></tr>
+          ${rooming.map(r => { const res = r.entries.filter(e => e.status === 'reserved').length; return `<tr>
+            <td><b>${esc(r.name)}</b></td><td class="muted" style="font-size:12px">${day(r.checkIn)}→${day(r.checkOut)}</td>
+            <td>${r.entries.length}</td><td>${res}/${r.entries.length}</td>
+            <td>${badge(stLabel[r.status], stColor[r.status])}</td>
+            <td>${r.status !== 'cancelled' && res < r.entries.length ? `<button class="btn small" onclick="_rlMat('${r.id}')">Materializar</button>` : ''}</td></tr>`; }).join('')}</table>` : '<p class="muted">Sin grupos. Crea un rooming list para reservar en bloque.</p>'}
+      </div>`;
   }
 
   async function viewHousekeeping() {
@@ -2938,6 +3035,7 @@
     booking: ['Nueva reserva', viewBooking],
     inbox: ['Inbox omnicanal', viewInbox],
     crm: ['CRM — Leads', viewCrm],
+    corporate: ['Cuentas corporativas y grupos', viewCorporate],
     marketing: ['Marketing & campañas', viewMarketing],
     reputation: ['Reputación & reseñas', viewReputation],
     events: ['Eventos, salones y montajes', viewEvents],
