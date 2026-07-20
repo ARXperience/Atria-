@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
 import { requestApproval } from '../services/approvals.js';
+import { checklistFor, toggleChecklistItem, checklistComplete, registerLostItem, updateLostItem, listLostItems } from '../services/housekeeping.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
 import { emitEvent } from '../lib/events.js';
@@ -41,7 +42,7 @@ opsRouter.post('/housekeeping/tasks', requirePermission('housekeeping.create'), 
   const { propertyId, roomId, type = 'request', priority = 'normal', notes } = req.body || {};
   if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
   if (!roomId) return badRequest(res, 'roomId requerido');
-  const task = await prisma.housekeepingTask.create({ data: { propertyId, roomId, type, priority, notes, assignedTo: req.body?.assignedTo || null } });
+  const task = await prisma.housekeepingTask.create({ data: { propertyId, roomId, type, priority, notes, assignedTo: req.body?.assignedTo || null, checklist: JSON.stringify(checklistFor(type)) } });
   await audit({ propertyId, user: req.user, action: 'housekeeping.task_created', entity: 'HousekeepingTask', entityId: task.id, after: req.body });
   emitEvent('housekeeping.task_created', { propertyId, entityId: task.id });
   res.status(201).json(task);
@@ -54,6 +55,10 @@ opsRouter.patch('/housekeeping/tasks/:id', requirePermission('housekeeping.edit'
   const data = {};
   if (status) {
     if (!['pending', 'in_progress', 'done', 'inspected'].includes(status)) return badRequest(res, 'Estado inválido');
+    // No se puede cerrar la limpieza con el protocolo incompleto (§30).
+    if ((status === 'done' || status === 'inspected') && task.checklist && !checklistComplete(task)) {
+      return badRequest(res, 'Completa todos los puntos del protocolo de limpieza antes de cerrar la tarea');
+    }
     data.status = status;
     if (status === 'done' || status === 'inspected') data.completedAt = new Date();
   }
@@ -69,6 +74,36 @@ opsRouter.patch('/housekeeping/tasks/:id', requirePermission('housekeeping.edit'
   }
   await audit({ propertyId: task.propertyId, user: req.user, action: 'housekeeping.task_updated', entity: 'HousekeepingTask', entityId: task.id, before: { status: task.status }, after: data });
   res.json(updated);
+});
+
+// Marcar/desmarcar un punto del protocolo de limpieza (§30)
+opsRouter.patch('/housekeeping/tasks/:id/checklist', requirePermission('housekeeping.edit'), async (req, res) => {
+  const task = await prisma.housekeepingTask.findUnique({ where: { id: req.params.id } });
+  if (!task || !propertyScope(req, task.propertyId)) return res.status(404).json({ error: 'Tarea no encontrada' });
+  try {
+    res.json(await toggleChecklistItem(task.id, { index: +req.body?.index, done: req.body?.done, user: req.user }));
+  } catch (err) { badRequest(res, err.message); }
+});
+
+// ---- Objetos perdidos y encontrados (§30) ----
+opsRouter.get('/lost-found', requirePermission('housekeeping.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await listLostItems(req.query.propertyId, { status: req.query.status }));
+});
+
+opsRouter.post('/lost-found', requirePermission('housekeeping.create'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try {
+    res.status(201).json(await registerLostItem({ ...req.body, user: req.user }));
+  } catch (err) { badRequest(res, err.message); }
+});
+
+opsRouter.patch('/lost-found/:id', requirePermission('housekeeping.edit'), async (req, res) => {
+  const item = await prisma.lostItem.findUnique({ where: { id: req.params.id } });
+  if (!item || !propertyScope(req, item.propertyId)) return res.status(404).json({ error: 'Objeto no encontrado' });
+  try {
+    res.json(await updateLostItem(item.id, { status: req.body?.status, claimedBy: req.body?.claimedBy, notes: req.body?.notes, user: req.user }));
+  } catch (err) { badRequest(res, err.message); }
 });
 
 // ---- Mantenimiento ----

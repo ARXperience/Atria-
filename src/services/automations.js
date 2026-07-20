@@ -26,8 +26,9 @@ export function registerAutomations() {
   bus.on('checkout.completed', async ({ propertyId, reservationId, roomId }) => {
     try {
       if (roomId) {
+        const { checklistFor } = await import('./housekeeping.js');
         await prisma.housekeepingTask.create({
-          data: { propertyId, roomId, type: 'checkout_clean', priority: 'high', notes: `Post check-out reserva ${reservationId}` },
+          data: { propertyId, roomId, type: 'checkout_clean', priority: 'high', notes: `Post check-out reserva ${reservationId}`, checklist: JSON.stringify(checklistFor('checkout_clean')) },
         });
       }
       // Atria Fiscal: borrador de factura automático desde el folio (sección 16)

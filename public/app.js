@@ -702,12 +702,46 @@
   }
 
   async function viewHousekeeping() {
-    const tasks = await get(`/ops/housekeeping/tasks?${pid()}`);
+    const [tasks, lost] = await Promise.all([
+      get(`/ops/housekeeping/tasks?${pid()}`),
+      get(`/ops/lost-found?${pid()}`),
+    ]);
     window._hkStatus = async (id, status) => {
       try { await api(`/ops/housekeeping/tasks/${id}`, { method: 'PATCH', body: { status } }); toast('Tarea actualizada'); render(); }
       catch (err) { toast(err.message, true); }
     };
-    return `<div class="card"><table>
+    window._hkChk = async (id, index, done) => {
+      try { await api(`/ops/housekeeping/tasks/${id}/checklist`, { method: 'PATCH', body: { index, done } }); render(); }
+      catch (err) { toast(err.message, true); }
+    };
+    const parseChk = t => { try { return t.checklist ? JSON.parse(t.checklist) : []; } catch { return []; } };
+    const chkRow = t => {
+      const list = parseChk(t);
+      if (!list.length) return '';
+      const doneN = list.filter(x => x.done).length;
+      const editable = ['pending', 'in_progress'].includes(t.status);
+      return `<tr><td colspan="7" style="padding:0 0 10px 14px">
+        <details ${editable && doneN < list.length ? 'open' : ''}><summary style="cursor:pointer;font-size:12.5px;color:var(--muted)">Protocolo de limpieza — ${doneN}/${list.length} completado</summary>
+        <div style="margin-top:8px;display:grid;gap:5px">
+          ${list.map((x, i) => `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;${x.done ? 'color:var(--muted);text-decoration:line-through' : ''}">
+            <input type="checkbox" ${x.done ? 'checked' : ''} ${editable ? '' : 'disabled'} onchange="_hkChk('${t.id}',${i},this.checked)"> ${esc(x.item)}</label>`).join('')}
+        </div></details></td></tr>`;
+    };
+    window._lfAdd = async () => {
+      try {
+        await api('/ops/lost-found', { method: 'POST', body: { propertyId: state.propertyId, description: $('#lfDesc').value, location: $('#lfLoc').value } });
+        toast('Objeto registrado'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._lfSet = async (id, status) => {
+      let claimedBy = null;
+      if (status === 'returned') { claimedBy = prompt('¿A nombre de quién se entrega?') || ''; }
+      try { await api(`/ops/lost-found/${id}`, { method: 'PATCH', body: { status, claimedBy } }); toast('Actualizado'); render(); }
+      catch (err) { toast(err.message, true); }
+    };
+    const lfLabel = { stored: 'En custodia', claimed: 'Reclamado', returned: 'Entregado', discarded: 'Descartado' };
+    const lfBadge = { stored: 'yellow', claimed: 'blue', returned: 'green', discarded: 'gray' };
+    return `<div class="card"><h3>Tareas de limpieza</h3><table>
       <tr><th>Habitación</th><th>Tipo</th><th>Prioridad</th><th>Estado</th><th>Notas</th><th>Creada</th><th></th></tr>
       ${tasks.map(t => `<tr>
         <td><b>${esc(t.room.number)}</b></td><td>${esc(t.type)}</td><td>${esc(t.priority)}</td><td>${sb(t.status)}</td>
@@ -715,8 +749,21 @@
         <td>${t.status === 'pending' ? `<button class="btn small secondary" onclick="_hkStatus('${t.id}','in_progress')">Iniciar</button>` : ''}
           ${t.status === 'in_progress' ? `<button class="btn small secondary" onclick="_hkStatus('${t.id}','done')">Terminar</button>` : ''}
           ${t.status === 'done' ? `<button class="btn small secondary" onclick="_hkStatus('${t.id}','inspected')">Inspeccionar</button>` : ''}</td>
-      </tr>`).join('')}
-    </table>${tasks.length ? '' : '<p class="muted">Sin tareas. Se generan automáticamente en cada check-out.</p>'}</div>`;
+      </tr>${chkRow(t)}`).join('')}
+    </table>${tasks.length ? '' : '<p class="muted">Sin tareas. Se generan automáticamente en cada check-out.</p>'}</div>
+    <div class="card mt"><h3>🧳 Objetos perdidos y encontrados</h3>
+      <div class="row" style="align-items:flex-end;gap:10px">
+        <div style="flex:2"><label>Descripción</label><input id="lfDesc" placeholder="Cargador negro, gafas, etc."></div>
+        <div style="flex:1"><label>Dónde se encontró</label><input id="lfLoc" placeholder="Hab 203 / Lobby"></div>
+        <button class="btn fit" onclick="_lfAdd()">Registrar</button>
+      </div>
+      ${lost.length ? `<table class="mt"><tr><th>Objeto</th><th>Lugar</th><th>Encontrado por</th><th>Fecha</th><th>Estado</th><th></th></tr>
+        ${lost.map(l => `<tr><td>${esc(l.description)}${l.claimedBy ? `<div class="muted" style="font-size:11px">Entregado a: ${esc(l.claimedBy)}</div>` : ''}</td>
+          <td class="muted">${esc(l.location || '—')}</td><td class="muted">${esc(l.foundBy || '—')}</td><td class="muted" style="font-size:12px">${dt(l.foundAt)}</td>
+          <td>${badge(lfLabel[l.status] || l.status, lfBadge[l.status] || 'gray')}</td>
+          <td>${l.status === 'stored' ? `<button class="btn small secondary" onclick="_lfSet('${l.id}','returned')">Entregar</button> <button class="btn small ghost" onclick="_lfSet('${l.id}','discarded')">Descartar</button>` : ''}</td>
+        </tr>`).join('')}</table>` : '<p class="muted mt">Sin objetos registrados.</p>'}
+    </div>`;
   }
 
   async function viewGuestRequests() {

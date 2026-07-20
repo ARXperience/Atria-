@@ -202,6 +202,7 @@ async function main() {
       assert.ok(approvalId);
     });
 
+    let cleanTaskId;
     await test('gerente aprueba → check-out ejecutado + tarea de limpieza', async () => {
       const { status } = await api(`/api/approvals/${approvalId}/decide`, { method: 'POST', body: { approve: true } });
       assert.equal(status, 200);
@@ -209,7 +210,47 @@ async function main() {
       const { data: r } = await api(`/api/reservations/${reservation.id}`);
       assert.equal(r.status, 'checked_out');
       const { data: tasks } = await api(`/api/ops/housekeeping/tasks?propertyId=${propertyId}`);
-      assert.ok(tasks.some(t => t.type === 'checkout_clean'), 'debe crear tarea de limpieza automática');
+      const ct = tasks.find(t => t.type === 'checkout_clean');
+      assert.ok(ct, 'debe crear tarea de limpieza automática');
+      cleanTaskId = ct.id;
+    });
+
+    // ===== Housekeeping: protocolo de limpieza + objetos perdidos (§30) =====
+    await test('la tarea de check-out trae un protocolo de limpieza (checklist)', async () => {
+      const { data: tasks } = await api(`/api/ops/housekeeping/tasks?propertyId=${propertyId}`);
+      const ct = tasks.find(t => t.id === cleanTaskId);
+      const list = JSON.parse(ct.checklist || '[]');
+      assert.ok(list.length >= 5, 'el protocolo tiene varios puntos');
+      assert.ok(list.every(x => x.done === false), 'todos empiezan sin marcar');
+    });
+
+    await test('no se puede cerrar la limpieza con el protocolo incompleto', async () => {
+      const res = await api(`/api/ops/housekeeping/tasks/${cleanTaskId}`, { method: 'PATCH', body: { status: 'done' } });
+      assert.equal(res.status, 400);
+    });
+
+    await test('marcar todos los puntos permite cerrar la tarea', async () => {
+      const { data: tasks } = await api(`/api/ops/housekeeping/tasks?propertyId=${propertyId}`);
+      const ct = tasks.find(t => t.id === cleanTaskId);
+      const list = JSON.parse(ct.checklist || '[]');
+      for (let i = 0; i < list.length; i++) {
+        await api(`/api/ops/housekeeping/tasks/${cleanTaskId}/checklist`, { method: 'PATCH', body: { index: i, done: true } });
+      }
+      const ok = await api(`/api/ops/housekeeping/tasks/${cleanTaskId}`, { method: 'PATCH', body: { status: 'done' } });
+      assert.equal(ok.status, 200);
+      assert.equal(ok.data.status, 'done');
+    });
+
+    await test('registrar y entregar un objeto perdido', async () => {
+      const created = await api('/api/ops/lost-found', { method: 'POST', body: { propertyId, description: 'Cargador de laptop negro', location: 'Hab 101' } });
+      assert.equal(created.status, 201);
+      assert.equal(created.data.status, 'stored');
+      const list = await api(`/api/ops/lost-found?propertyId=${propertyId}`);
+      assert.ok(list.data.some(l => l.id === created.data.id), 'aparece en la lista');
+      const ret = await api(`/api/ops/lost-found/${created.data.id}`, { method: 'PATCH', body: { status: 'returned', claimedBy: 'Laura Pérez' } });
+      assert.equal(ret.data.status, 'returned');
+      assert.equal(ret.data.claimedBy, 'Laura Pérez');
+      assert.ok(ret.data.resolvedAt);
     });
 
     // ===== Encuestas post-estadía + quejas (§37) =====

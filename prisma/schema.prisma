@@ -1212,8 +1212,28 @@ model HousekeepingTask {
   status     String   @default("pending") // pending | in_progress | done | inspected
   assignedTo String?
   notes      String?
+  checklist  String?  // JSON [{ item, done }] — protocolo de limpieza por tipo
   createdAt  DateTime @default(now())
   completedAt DateTime?
+
+  @@index([propertyId, status])
+}
+
+// Objetos perdidos y encontrados (§30)
+model LostItem {
+  id            String   @id @default(cuid())
+  propertyId    String
+  roomId        String?
+  reservationId String?
+  description   String
+  location      String?  // dónde se encontró
+  status        String   @default("stored") // stored | claimed | returned | discarded
+  foundBy       String?
+  foundAt       DateTime @default(now())
+  claimedBy     String?  // nombre del huésped que reclama
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  notes         String?
 
   @@index([propertyId, status])
 }
