@@ -1492,6 +1492,19 @@ async function main() {
       assert.equal(prods.data.find(p => p.id === posProductId).stock, 970, 'la receta descontó 30 g de café');
     });
 
+    await test('forecast de cocina proyecta cubiertos, demanda por plato e insumos', async () => {
+      const { status, data } = await api(`/api/pos/forecast?propertyId=${propertyId}&days=7`);
+      assert.equal(status, 200);
+      assert.equal(data.windowDays, 7);
+      assert.ok(Array.isArray(data.days) && data.days.length === 7, 'proyección diaria');
+      assert.ok(Array.isArray(data.itemDemand) && Array.isArray(data.purchaseList));
+      // Con histórico de ventas del café, el mix lo incluye.
+      assert.equal(data.hasHistory, true, 'usa el histórico de comandas');
+      assert.ok(data.itemDemand.some(i => /café/i.test(i.name)), 'proyecta demanda del plato vendido');
+      // El café tiene receta con grano → aparece en la lista de compras.
+      assert.ok(data.purchaseList.some(p => /grano/i.test(p.name)), 'expande la receta a insumos');
+    });
+
     let roomServiceResvId;
     await test('room service se carga al folio de una habitación en casa', async () => {
       // Crear reserva, pagar, check-in

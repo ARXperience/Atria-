@@ -97,6 +97,12 @@ async function opsRiskSignals(propertyId) {
     const lowStock = low ? await prisma.$queryRawUnsafe(`SELECT COUNT(*) as c FROM Product WHERE propertyId = ? AND stock <= stockMin`, propertyId).then(r => Number(r?.[0]?.c || 0)).catch(() => 0) : 0;
     if (lowStock > 0) out.push({ area: 'inventory', permission: 'inventory.view', severity: 'info', title: `${lowStock} producto(s) en o bajo el mínimo`, detail: `Reponer a tiempo evita quiebres de stock en amenidades y minibar.`, action: 'Inventario → generar orden de compra.', metric: lowStock });
   } catch { /* */ }
+  // Cocina: insumos que no alcanzan para la demanda proyectada.
+  try {
+    const { kitchenForecast } = await import('./kitchen.js');
+    const kf = await kitchenForecast(propertyId, { days: 7 });
+    if (kf.shortages > 0) out.push({ area: 'pos', permission: 'pos.view', severity: 'info', title: `${kf.shortages} insumo(s) de cocina no alcanzan para la demanda`, detail: `Se proyectan ${kf.totalCovers} cubiertos en 7 días; algunos insumos quedan por debajo del requerimiento.`, action: 'Restaurante → Forecast de cocina → generar compras.', metric: kf.shortages });
+  } catch { /* */ }
   return out;
 }
 

@@ -2335,11 +2335,12 @@
   }
 
   async function viewPos() {
-    const [menu, orders, inhouse, products] = await Promise.all([
+    const [menu, orders, inhouse, products, kf] = await Promise.all([
       get(`/pos/menu?${pid()}`),
       get(`/pos/orders?${pid()}`),
       get(`/reservations?${pid()}&status=checked_in`).catch(() => []),
       get(`/inventory/products?${pid()}`).catch(() => []),
+      get(`/pos/forecast?${pid()}&days=7`).catch(() => null),
     ]);
     // Carrito en memoria de sesión
     state.pos = state.pos || { cart: [] };
@@ -2374,7 +2375,24 @@
       catch (e) { toast(e.message, true); }
     };
     const cartTotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
+    const kfCard = kf ? `
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center">
+        <h3>🍳 Forecast de cocina — próximos ${kf.windowDays} días</h3>
+        <span class="muted" style="font-size:12px">${kf.totalCovers} cubiertos proyectados${kf.hasHistory ? '' : ' · mix uniforme (sin histórico aún)'}</span></div>
+      <div class="grid cols-2 mt">
+        <div>
+          <div class="label" style="margin-bottom:6px">Demanda por plato</div>
+          ${kf.itemDemand.length ? `<table><tr><th>Plato</th><th>Cant.</th><th>Ingreso est.</th></tr>
+            ${kf.itemDemand.slice(0, 8).map(i => `<tr><td>${esc(i.name)}</td><td><b>${i.projectedQty}</b></td><td class="muted">${cop(i.projectedRevenue)}</td></tr>`).join('')}</table>` : '<p class="muted">Sin platos en la carta.</p>'}
+        </div>
+        <div>
+          <div class="label" style="margin-bottom:6px">Lista de compras (mise en place)${kf.shortages ? ` · <span style="color:var(--red)">${kf.shortages} por reponer</span>` : ''}</div>
+          ${kf.purchaseList.length ? `<table><tr><th>Insumo</th><th>Necesita</th><th>Stock</th><th>Comprar</th></tr>
+            ${kf.purchaseList.slice(0, 8).map(p => `<tr><td>${esc(p.name)}</td><td>${p.needed} ${esc(p.unit || '')}</td><td class="muted">${p.stock}</td><td>${p.toBuy > 0 ? `<b style="color:var(--red)">${p.toBuy}</b>` : '<span class="muted">ok</span>'}</td></tr>`).join('')}</table>` : '<p class="muted">Define recetas en el menú para calcular insumos.</p>'}
+        </div>
+      </div></div>` : '';
     return `
+      ${kfCard}
       <div class="grid cols-2">
         <div class="card"><h3>Nueva comanda</h3>
           <div class="row">

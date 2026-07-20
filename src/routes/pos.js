@@ -13,6 +13,13 @@ posRouter.get('/menu', requirePermission('pos.view'), async (req, res) => {
   if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
   res.json(await prisma.menuItem.findMany({ where: { propertyId: req.query.propertyId, active: true }, orderBy: { name: 'asc' } }));
 });
+
+// Forecast de demanda de cocina + lista de compras (§32)
+posRouter.get('/forecast', requirePermission('pos.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const { kitchenForecast } = await import('../services/ai/kitchen.js');
+  res.json(await kitchenForecast(req.query.propertyId, { days: Math.min(14, +req.query.days || 7) }));
+});
 posRouter.post('/menu', requirePermission('pos.manage'), async (req, res) => {
   const { propertyId, name, category, price, recipe } = req.body || {};
   if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
