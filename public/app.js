@@ -197,6 +197,7 @@
     ['integrations', '🔌 Integraciones'],
     ['automations', '⚡ Automatizaciones'],
     ['onboarding', '🚀 Onboarding & Importar'],
+    ['datagov', '🧪 Calidad de datos'],
     ['subscription', '💠 Suscripción'],
     ['saasadmin', '🛡️ Consola SaaS'],
     ['settings', '⚙️ Configuración'],
@@ -2425,6 +2426,33 @@
       </div>`;
   }
 
+  async function viewDataGovernance() {
+    const dq = await get(`/admin/data-quality?${pid()}`);
+    const scoreColor = dq.score >= 90 ? 'var(--green)' : dq.score >= 70 ? 'var(--yellow)' : 'var(--red)';
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Salud de datos</div><div class="value" style="color:${scoreColor}">${dq.score}<small>/100</small></div></div>
+        <div class="kpi"><div class="label">Registros revisados</div><div class="value">${dq.totalRecords}</div></div>
+        <div class="kpi"><div class="label">Problemas detectados</div><div class="value" style="color:${dq.totalIssues ? 'var(--yellow)' : 'var(--green)'}">${dq.totalIssues}</div></div>
+        <div class="kpi"><div class="label">Categorías</div><div class="value">${dq.issues.length}</div></div>
+      </div>
+      <div class="card mt"><h3>Hallazgos de calidad de datos</h3>
+        <p class="muted" style="font-size:12px">Revisamos ${dq.scanned.guests} huésped(es), ${dq.scanned.employees} empleado(s) y ${dq.scanned.reservations} reserva(s). El informe no modifica datos; corrige desde cada módulo.</p>
+        ${dq.issues.length ? dq.issues.map(i => `<div style="padding:11px 0;border-bottom:1px solid var(--border)">
+          <div class="row" style="justify-content:space-between"><b>${esc(i.label)}</b><span class="badge yellow">${i.count}</span></div>
+          ${i.samples.length ? `<div class="muted" style="font-size:12px;margin-top:4px">Ejemplos: ${i.samples.map(esc).join(' · ')}</div>` : ''}
+        </div>`).join('') : '<p style="color:var(--green)">✅ Sin problemas de calidad detectados. ¡Excelente!</p>'}
+      </div>
+      <div class="card mt"><h3>Gobierno de datos (§55.4)</h3>
+        <table>
+          <tr><td>🗂️ Inventario de bases de datos (RNBD)</td><td class="right"><a class="btn small ghost" href="#dataprotection">Ver</a></td></tr>
+          <tr><td>🔒 Consentimientos y derechos ARCO (Habeas Data)</td><td class="right"><a class="btn small ghost" href="#dataprotection">Ver</a></td></tr>
+          <tr><td>🧾 Trazabilidad y versionamiento de cambios</td><td class="right"><a class="btn small ghost" href="#audit">Auditoría</a></td></tr>
+        </table>
+        <p class="muted mt" style="font-size:12px">Eliminación lógica y anonimización se gestionan desde Protección de datos; los respaldos y la retención se configuran en el despliegue (ver DEPLOY.md).</p>
+      </div>`;
+  }
+
   async function viewSubscription() {
     const [sub, plans] = await Promise.all([get('/saas/subscription'), get('/saas/plans')]);
     const stLabel = { trial: 'Prueba', active: 'Activa', suspended: 'Suspendida', cancelled: 'Cancelada' };
@@ -2654,6 +2682,7 @@
     integrations: ['Centro de integraciones', viewIntegrations],
     automations: ['Automatizaciones — reglas no-code', viewAutomations],
     onboarding: ['Onboarding e importación de datos', viewOnboarding],
+    datagov: ['Calidad y gobierno de datos', viewDataGovernance],
     subscription: ['Mi suscripción y consumo', viewSubscription],
     saasadmin: ['Consola del superadministrador SaaS', viewSaasAdmin],
     settings: ['Configuración', viewSettings],

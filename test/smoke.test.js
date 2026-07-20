@@ -1686,6 +1686,19 @@ async function main() {
       assert.equal(r.data.errors.length, 2, 'rechaza sin cargo y salario 0');
     });
 
+    // ===== Gobierno / calidad de datos (§55.4) =====
+    await test('el informe de calidad de datos detecta correos y teléfonos inválidos', async () => {
+      // Importa huéspedes con datos problemáticos
+      const csv = 'nombre,documento,telefono,correo\nDato Malo,DQ-1,123,no-es-correo\nDato Bien,DQ-2,3001112233,ok@correo.co';
+      await api('/api/admin/import/guests', { method: 'POST', body: { propertyId, csv } });
+      const { status, data } = await api(`/api/admin/data-quality?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(data.totalRecords > 0);
+      assert.ok(data.score >= 0 && data.score <= 100);
+      assert.ok(data.issues.find(i => i.key === 'guest_bad_email'), 'debe detectar el correo inválido');
+      assert.ok(data.issues.find(i => i.key === 'guest_bad_phone'), 'debe detectar el teléfono corto');
+    });
+
     // ===== Seguridad avanzada (§55.3): 2FA, recuperación, sesiones =====
     const secEmail = `sec-${Date.now()}@atria.co`;
     await test('crear usuario dedicado para pruebas de seguridad', async () => {

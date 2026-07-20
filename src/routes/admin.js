@@ -8,6 +8,7 @@ import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
 import { importRooms, importGuests, importEmployees, goLiveChecklist } from '../services/importer.js';
 import { assertWithinLimit } from '../services/saas.js';
+import { scanDataQuality } from '../services/dataQuality.js';
 
 export const adminRouter = Router();
 
@@ -15,6 +16,12 @@ export const adminRouter = Router();
 adminRouter.get('/checklist', requirePermission('settings.view'), async (req, res) => {
   if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
   res.json(await goLiveChecklist(req.query.propertyId, req.user.companyId));
+});
+
+// Calidad de datos (§55.4): informe de problemas detectados (no modifica datos).
+adminRouter.get('/data-quality', requirePermission('settings.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await scanDataQuality(req.query.propertyId, req.user.companyId));
 });
 
 adminRouter.post('/import/rooms', requirePermission('rooms.manage'), async (req, res) => {
