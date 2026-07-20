@@ -263,6 +263,32 @@ async function main() {
       assert.ok(ret.data.resolvedAt);
     });
 
+    // ===== Housekeeping inteligente: priorización + asignación balanceada (§30) =====
+    await test('el plan de housekeeping prioriza tareas y lista al personal', async () => {
+      // Crea un par de tareas pendientes sobre habitaciones reales.
+      const rooms = await api(`/api/admin/rooms?propertyId=${propertyId}`);
+      await api('/api/ops/housekeeping/tasks', { method: 'POST', body: { propertyId, roomId: rooms.data[0].id, type: 'checkout_clean', priority: 'urgent' } });
+      await api('/api/ops/housekeeping/tasks', { method: 'POST', body: { propertyId, roomId: rooms.data[1].id, type: 'stayover', priority: 'low' } });
+      const { status, data } = await api(`/api/ops/housekeeping/plan?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(Array.isArray(data.tasks) && data.tasks.length >= 2);
+      assert.ok(Array.isArray(data.staff) && data.staff.some(s => /housekeeping/i.test(s.name)), 'lista al personal de housekeeping');
+      // La urgente debe puntuar por encima de la de baja prioridad.
+      const urgent = data.tasks.find(t => t.priority === 'urgent');
+      const low = data.tasks.find(t => t.priority === 'low');
+      assert.ok(urgent.score > low.score, 'la tarea urgente tiene mayor prioridad');
+    });
+
+    await test('la asignación automática reparte las tareas sin responsable', async () => {
+      const before = await api(`/api/ops/housekeeping/plan?propertyId=${propertyId}`);
+      const unassigned = before.data.unassigned;
+      const { status, data } = await api('/api/ops/housekeeping/auto-assign', { method: 'POST', body: { propertyId } });
+      assert.equal(status, 200);
+      assert.equal(data.assigned, unassigned, 'asigna todas las tareas sin responsable');
+      const after = await api(`/api/ops/housekeeping/plan?propertyId=${propertyId}`);
+      assert.equal(after.data.unassigned, 0, 'ya no quedan tareas sin asignar');
+    });
+
     // ===== Activos + mantenimiento preventivo (§31) =====
     let assetId, prevOrderId;
     await test('registrar un activo con cadencia y servicio vencido', async () => {

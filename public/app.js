@@ -982,14 +982,29 @@
   }
 
   async function viewHousekeeping() {
-    const [tasks, lost] = await Promise.all([
+    const [tasks, lost, plan] = await Promise.all([
       get(`/ops/housekeeping/tasks?${pid()}`),
       get(`/ops/lost-found?${pid()}`),
+      get(`/ops/housekeeping/plan?${pid()}`).catch(() => null),
     ]);
     window._hkStatus = async (id, status) => {
       try { await api(`/ops/housekeeping/tasks/${id}`, { method: 'PATCH', body: { status } }); toast('Tarea actualizada'); render(); }
       catch (err) { toast(err.message, true); }
     };
+    window._hkAutoAssign = async () => {
+      try { const { data } = await api('/ops/housekeeping/auto-assign', { method: 'POST', body: { propertyId: state.propertyId } }); toast(`${data.assigned} tarea(s) asignada(s) de forma balanceada`); render(); }
+      catch (err) { toast(err.message, true); }
+    };
+    const prioColor = s => s >= 70 ? 'var(--red)' : s >= 45 ? 'var(--yellow)' : 'var(--muted)';
+    const planCard = plan && plan.tasks.length ? `
+      <div class="card" ${plan.arrivalsToday ? 'style="border-left:3px solid var(--accent)"' : ''}><div style="display:flex;justify-content:space-between;align-items:center">
+        <h3>🧠 Plan de limpieza priorizado ${plan.arrivalsToday ? `<span class="muted" style="font-size:12px;font-weight:400">— ${plan.arrivalsToday} llegada(s) hoy</span>` : ''}</h3>
+        ${plan.unassigned ? `<button class="btn small" onclick="_hkAutoAssign()">Asignar automáticamente (${plan.unassigned})</button>` : ''}</div>
+      <p class="muted" style="font-size:12px">Orden sugerido por urgencia: habitaciones para llegadas de hoy, salidas por preparar, prioridad y antigüedad.${plan.staff.length ? ` Personal disponible: ${plan.staff.length}.` : ' Sin personal de housekeeping registrado.'}</p>
+      <table><tr><th>#</th><th>Hab</th><th>Tipo</th><th>Prioridad</th><th>Motivo</th><th>Responsable</th></tr>
+        ${plan.tasks.slice(0, 12).map((t, i) => `<tr><td><b style="color:${prioColor(t.score)}">${i + 1}</b></td><td><b>${esc(t.roomNumber || '—')}</b></td><td>${esc(t.type)}</td><td>${sb(t.priority === 'urgent' || t.priority === 'high' ? 'pending' : 'confirmed')} ${esc(t.priority)}</td>
+          <td class="muted" style="font-size:11.5px">${esc(t.reason)}</td><td>${t.assignedTo ? esc(t.assignedTo) : '<span class="muted">sin asignar</span>'}</td></tr>`).join('')}</table>
+      </div>` : '';
     window._hkChk = async (id, index, done) => {
       try { await api(`/ops/housekeeping/tasks/${id}/checklist`, { method: 'PATCH', body: { index, done } }); render(); }
       catch (err) { toast(err.message, true); }
@@ -1021,7 +1036,7 @@
     };
     const lfLabel = { stored: 'En custodia', claimed: 'Reclamado', returned: 'Entregado', discarded: 'Descartado' };
     const lfBadge = { stored: 'yellow', claimed: 'blue', returned: 'green', discarded: 'gray' };
-    return `<div class="card"><h3>Tareas de limpieza</h3><table>
+    return `${planCard}<div class="card"><h3>Tareas de limpieza</h3><table>
       <tr><th>Habitación</th><th>Tipo</th><th>Prioridad</th><th>Estado</th><th>Notas</th><th>Creada</th><th></th></tr>
       ${tasks.map(t => `<tr>
         <td><b>${esc(t.room.number)}</b></td><td>${esc(t.type)}</td><td>${esc(t.priority)}</td><td>${sb(t.status)}</td>

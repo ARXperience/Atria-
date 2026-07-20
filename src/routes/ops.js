@@ -77,6 +77,22 @@ opsRouter.patch('/housekeeping/tasks/:id', requirePermission('housekeeping.edit'
   res.json(updated);
 });
 
+// Plan inteligente de housekeeping: tareas priorizadas + personal (§30)
+opsRouter.get('/housekeeping/plan', requirePermission('housekeeping.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const { housekeepingPlan } = await import('../services/ai/housekeepingIntel.js');
+  res.json(await housekeepingPlan(req.query.propertyId));
+});
+
+// Asignación balanceada automática de tareas sin responsable
+opsRouter.post('/housekeeping/auto-assign', requirePermission('housekeeping.edit'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try {
+    const { autoAssignHousekeeping } = await import('../services/ai/housekeepingIntel.js');
+    res.json(await autoAssignHousekeeping(req.body.propertyId, { user: req.user }));
+  } catch (err) { badRequest(res, err.message); }
+});
+
 // Marcar/desmarcar un punto del protocolo de limpieza (§30)
 opsRouter.patch('/housekeeping/tasks/:id/checklist', requirePermission('housekeeping.edit'), async (req, res) => {
   const task = await prisma.housekeepingTask.findUnique({ where: { id: req.params.id } });

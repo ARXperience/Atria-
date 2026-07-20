@@ -97,6 +97,13 @@ async function opsRiskSignals(propertyId) {
     const lowStock = low ? await prisma.$queryRawUnsafe(`SELECT COUNT(*) as c FROM Product WHERE propertyId = ? AND stock <= stockMin`, propertyId).then(r => Number(r?.[0]?.c || 0)).catch(() => 0) : 0;
     if (lowStock > 0) out.push({ area: 'inventory', permission: 'inventory.view', severity: 'info', title: `${lowStock} producto(s) en o bajo el mínimo`, detail: `Reponer a tiempo evita quiebres de stock en amenidades y minibar.`, action: 'Inventario → generar orden de compra.', metric: lowStock });
   } catch { /* */ }
+  // Housekeeping: salidas por preparar con llegadas el mismo día.
+  try {
+    const { housekeepingPlan } = await import('./housekeepingIntel.js');
+    const hp = await housekeepingPlan(propertyId);
+    const urgent = hp.tasks.filter(t => t.score >= 70).length;
+    if (urgent > 0 && hp.arrivalsToday > 0) out.push({ area: 'housekeeping', permission: 'housekeeping.view', severity: 'warning', title: `${urgent} habitación(es) urgentes por limpiar para llegadas de hoy`, detail: `Hay ${hp.arrivalsToday} llegada(s) hoy y ${hp.unassigned} tarea(s) sin asignar. Prioriza para tener las habitaciones listas.`, action: 'Housekeeping → Plan priorizado → asignar automáticamente.', metric: urgent });
+  } catch { /* */ }
   // Cocina: insumos que no alcanzan para la demanda proyectada.
   try {
     const { kitchenForecast } = await import('./kitchen.js');
