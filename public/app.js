@@ -2454,10 +2454,14 @@
   }
 
   async function viewSubscription() {
-    const [sub, plans] = await Promise.all([get('/saas/subscription'), get('/saas/plans')]);
+    const [sub, plans, invoices] = await Promise.all([get('/saas/subscription'), get('/saas/plans'), get('/saas/invoices').catch(() => [])]);
     const stLabel = { trial: 'Prueba', active: 'Activa', suspended: 'Suspendida', cancelled: 'Cancelada' };
     const stColor = { trial: 'yellow', active: 'green', suspended: 'red', cancelled: 'gray' };
+    const invLabel = { pending: 'Pendiente', paid: 'Pagada', overdue: 'En mora', void: 'Anulada' };
+    const invColor = { pending: 'yellow', paid: 'green', overdue: 'red', void: 'gray' };
     const barColor = u => u.over ? 'var(--red)' : u.pct >= 80 ? 'var(--yellow)' : 'var(--green)';
+    const canPay = ['OWNER', 'MANAGER'].includes(state.user.role) || state.user.isSuperAdmin;
+    window._payInvoice = async id => { try { await api(`/saas/invoices/${id}/pay`, { method: 'POST', body: {} }); toast('Factura pagada ✅'); render(); } catch (e) { toast(e.message, true); } };
     return `
       <div class="card"><h3>Mi plan</h3>
         <div class="row" style="align-items:center;gap:14px">
@@ -2476,16 +2480,26 @@
         <table><tr><th>Plan</th><th>Precio/mes</th><th>Usuarios</th><th>Sedes</th><th>Habitaciones</th><th>Msgs IA</th></tr>
         ${plans.map(p => `<tr${p.code === sub.plan.code ? ' style="background:var(--accent-soft)"' : ''}><td><b>${esc(p.name)}</b>${p.code === sub.plan.code ? ' <span class="badge green" style="font-size:9px">actual</span>' : ''}</td><td>${p.priceMonthly ? cop(p.priceMonthly) : '—'}</td><td>${p.maxUsers}</td><td>${p.maxProperties}</td><td>${p.maxRooms}</td><td>${p.aiMessagesMonth.toLocaleString('es-CO')}</td></tr>`).join('')}</table>
         <p class="muted mt" style="font-size:12px">Para cambiar de plan o activar add-ons, contacta a tu ejecutivo comercial. La facturación del software la gestiona el superadministrador.</p>
+      </div>
+      <div class="card mt"><h3>Facturas del software</h3>
+        ${invoices.length ? `<table><tr><th>Periodo</th><th>Plan</th><th>Valor</th><th>Vence</th><th>Estado</th><th></th></tr>
+        ${invoices.map(i => `<tr><td><b>${esc(i.period)}</b></td><td>${esc(i.planCode)}</td><td>${cop(i.amount)}</td><td>${day(i.dueDate)}</td>
+          <td>${badge(invLabel[i.status] || i.status, invColor[i.status] || 'gray')}</td>
+          <td>${i.status !== 'paid' && i.status !== 'void' && canPay ? `<button class="btn small" onclick="_payInvoice('${i.id}')">Pagar</button>` : ''}</td>
+        </tr>`).join('')}</table>` : '<p class="muted">Aún no hay facturas del software emitidas.</p>'}
       </div>`;
   }
 
   async function viewSaasAdmin() {
-    const companies = await get('/saas/companies');
-    const plans = await get('/saas/plans');
+    const [companies, plans, billing] = await Promise.all([get('/saas/companies'), get('/saas/plans'), get('/saas/billing').catch(() => null)]);
     const stLabel = { trial: 'Prueba', active: 'Activa', suspended: 'Suspendida', cancelled: 'Cancelada' };
     const stColor = { trial: 'yellow', active: 'green', suspended: 'red', cancelled: 'gray' };
+    const invColor = { pending: 'yellow', paid: 'green', overdue: 'red', void: 'gray' };
     window._saasPlan = async (id, code) => { try { await api(`/saas/companies/${id}/plan`, { method: 'POST', body: { planCode: code } }); toast('Plan actualizado'); render(); } catch (e) { toast(e.message, true); } };
     window._saasStatus = async (id, status) => { try { await api(`/saas/companies/${id}/status`, { method: 'POST', body: { status } }); toast('Estado actualizado'); render(); } catch (e) { toast(e.message, true); } };
+    window._saasGenInvoices = async () => { try { const r = await api('/saas/billing/generate', { method: 'POST' }); toast(`${r.created} factura(s) emitida(s)`); render(); } catch (e) { toast(e.message, true); } };
+    window._saasSweep = async () => { if (!confirm('¿Marcar en mora las facturas vencidas y suspender a los morosos?')) return; try { const r = await api('/saas/billing/sweep', { method: 'POST', body: { autoSuspend: true } }); toast(`${r.overdue} en mora, ${r.suspended} suspendida(s)`); render(); } catch (e) { toast(e.message, true); } };
+    window._payInvoice = async id => { try { await api(`/saas/invoices/${id}/pay`, { method: 'POST', body: {} }); toast('Factura pagada'); render(); } catch (e) { toast(e.message, true); } };
     const active = companies.filter(c => c.subStatus === 'active').length;
     const mrr = companies.filter(c => c.subStatus === 'active').reduce((s, c) => s + ((plans.find(p => p.code === c.planCode) || {}).priceMonthly || 0), 0);
     return `
@@ -2503,7 +2517,21 @@
           <td>${c.users}</td><td>${c.properties}</td>
           <td>${c.subStatus === 'suspended' ? `<button class="btn small" onclick="_saasStatus('${c.id}','active')">Reactivar</button>` : `<button class="btn small ghost danger" onclick="_saasStatus('${c.id}','suspended')">Suspender</button>`}</td>
         </tr>`).join('')}</table>
-      </div>`;
+      </div>
+      ${billing ? `<div class="card mt"><h3>Facturación del software</h3>
+        <div class="grid cols-4">
+          <div class="kpi"><div class="label">Cobrado (pagadas)</div><div class="value" style="color:var(--green)">${cop(billing.paid)}</div></div>
+          <div class="kpi"><div class="label">Por cobrar</div><div class="value" style="color:${billing.pending ? 'var(--yellow)' : 'inherit'}">${cop(billing.pending)}</div></div>
+          <div class="kpi"><div class="label">En mora</div><div class="value" style="color:${billing.overdue ? 'var(--red)' : 'inherit'}">${cop(billing.overdue)}</div></div>
+          <div class="kpi"><div class="label">Facturas</div><div class="value">${billing.counts.paid + billing.counts.pending + billing.counts.overdue}</div></div>
+        </div>
+        <div class="row mt"><button class="btn" onclick="_saasGenInvoices()">Emitir facturas del mes</button><button class="btn ghost danger" onclick="_saasSweep()">Marcar mora & suspender</button></div>
+        ${billing.invoices.length ? `<table class="mt"><tr><th>Empresa</th><th>Periodo</th><th>Plan</th><th>Valor</th><th>Vence</th><th>Estado</th><th></th></tr>
+        ${billing.invoices.map(i => `<tr><td>${esc(i.company)}</td><td>${esc(i.period)}</td><td>${esc(i.planCode)}</td><td>${cop(i.amount)}</td><td>${day(i.dueDate)}</td>
+          <td>${badge(({ pending: 'Pendiente', paid: 'Pagada', overdue: 'En mora', void: 'Anulada' })[i.status] || i.status, invColor[i.status] || 'gray')}</td>
+          <td>${i.status !== 'paid' && i.status !== 'void' ? `<button class="btn small" onclick="_payInvoice('${i.id}')">Registrar pago</button>` : ''}</td>
+        </tr>`).join('')}</table>` : '<p class="muted mt">Aún no hay facturas emitidas. Usa "Emitir facturas del mes".</p>'}
+      </div>` : ''}`;
   }
 
   async function viewSettings() {

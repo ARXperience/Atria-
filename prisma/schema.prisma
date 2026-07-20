@@ -55,6 +55,25 @@ model Plan {
   sortOrder      Int     @default(0)
 }
 
+// Facturación del software SaaS (§55.1): una factura mensual por empresa.
+model SaasInvoice {
+  id          String   @id @default(cuid())
+  companyId   String
+  period      String   // YYYY-MM
+  planCode    String
+  amount      Float
+  status      String   @default("pending") // pending | paid | overdue | void
+  issuedAt    DateTime @default(now())
+  dueDate     DateTime
+  paidAt      DateTime?
+  paymentRef  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, period])
+  @@index([companyId, status])
+}
+
 model Property {
   id          String   @id @default(cuid())
   companyId   String

@@ -1655,6 +1655,38 @@ async function main() {
       assert.equal(ok.status, 200, 'tras reactivar, la API responde de nuevo');
     });
 
+    // ===== Facturación del software SaaS (§55.1) =====
+    await test('el superadmin emite facturas y el tenant las ve', async () => {
+      const { data: sa } = await api('/api/auth/login', { method: 'POST', body: { email: 'superadmin@atria.co', password: 'atria2026' } });
+      const SH = { 'content-type': 'application/json', authorization: `Bearer ${sa.token}` };
+      const gen = await (await fetch(`${BASE}/api/saas/billing/generate`, { method: 'POST', headers: SH })).json();
+      assert.ok(gen.created >= 1, 'debe emitir al menos una factura');
+      // El tenant (gerente) ve su factura pendiente
+      const mine = await api('/api/saas/invoices');
+      assert.ok(mine.data.length >= 1);
+      assert.equal(mine.data[0].status, 'pending');
+    });
+
+    await test('pagar la factura del software extiende la suscripción', async () => {
+      const before = await api('/api/saas/invoices');
+      const inv = before.data.find(i => i.status !== 'paid');
+      assert.ok(inv, 'debe existir una factura por pagar');
+      const pay = await api(`/api/saas/invoices/${inv.id}/pay`, { method: 'POST', body: {} });
+      assert.equal(pay.status, 200);
+      assert.equal(pay.data.status, 'paid');
+      const sub = await api('/api/saas/subscription');
+      assert.equal(sub.data.status, 'active');
+    });
+
+    await test('un rol sin permiso no puede pagar la factura del software', async () => {
+      const before = await api('/api/saas/invoices');
+      // Asegura una factura pendiente de un periodo distinto no es trivial; validamos el permiso con housekeeping sobre cualquier factura existente
+      const anyInv = before.data[0];
+      const { data: login } = await api('/api/auth/login', { method: 'POST', body: { email: 'housekeeping@atria.co', password: 'atria2026' } });
+      const res = await fetch(`${BASE}/api/saas/invoices/${anyInv.id}/pay`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${login.token}` }, body: '{}' });
+      assert.equal(res.status, 403);
+    });
+
     // ===== Onboarding e importadores (§55.2) =====
     await test('checklist de go-live evalúa la preparación de la sede', async () => {
       const { status, data } = await api(`/api/admin/checklist?propertyId=${propertyId}`);
