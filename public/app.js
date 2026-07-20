@@ -309,7 +309,14 @@
         <div class="kpi"><div class="label">Aprobaciones pendientes</div><div class="value" style="color:${d.alerts.pendingApprovals ? 'var(--yellow)' : 'inherit'}"><span data-count="${d.alerts.pendingApprovals}">0</span></div></div>
         <div class="kpi"><div class="label">Limpiezas pendientes</div><div class="value"><span data-count="${d.alerts.housekeepingPending}">0</span></div></div>
         <div class="kpi"><div class="label">Leads abiertos</div><div class="value"><span data-count="${d.alerts.openLeads}">0</span></div></div>
-      </div>`;
+      </div>
+      ${d.ecosystem ? `<h3 class="mt" style="margin-bottom:10px">Ecosistema</h3>
+      <div class="grid cols-4">
+        <a class="kpi clickable" href="#reputation" style="text-decoration:none"><div class="label">Reputación ★</div><div class="value" style="color:var(--accent)">${d.ecosystem.reputationAvg || '—'}<small>${d.ecosystem.reviewsPending ? ` · ${d.ecosystem.reviewsPending} sin responder` : ''}</small></div></a>
+        <a class="kpi clickable" href="#events" style="text-decoration:none"><div class="label">Próximos eventos</div><div class="value"><span data-count="${d.ecosystem.upcomingEvents}">0</span></div></a>
+        <a class="kpi clickable" href="#finance" style="text-decoration:none"><div class="label">Cuentas por pagar</div><div class="value" style="color:${d.ecosystem.payableOpen ? 'var(--yellow)' : 'inherit'}"><span data-count="${d.ecosystem.payableOpen}" data-fmt="cop">$0</span></div></a>
+        <a class="kpi clickable" href="#dataprotection" style="text-decoration:none"><div class="label">Solicitudes de datos</div><div class="value" style="color:${d.ecosystem.dataRequestsOpen ? 'var(--yellow)' : 'inherit'}"><span data-count="${d.ecosystem.dataRequestsOpen}">0</span></div></a>
+      </div>` : ''}`;
   }
 
   async function viewRooms() {

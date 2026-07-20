@@ -1545,6 +1545,17 @@ async function main() {
       assert.equal(rc, 1, 'una reseña 2★ cumple la condición rating<3');
     });
 
+    await test('el dashboard incluye señales cruzadas del ecosistema', async () => {
+      const { status, data } = await api(`/api/dashboard?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(data.ecosystem, 'debe incluir el bloque ecosystem');
+      for (const k of ['reputationAvg', 'reviewsPending', 'upcomingEvents', 'dataRequestsOpen', 'payableOpen']) {
+        assert.ok(k in data.ecosystem, `falta ${k}`);
+      }
+      assert.ok(data.ecosystem.reputationAvg > 0, 'debe reflejar las reseñas creadas antes');
+      assert.ok(data.ecosystem.upcomingEvents >= 1, 'debe reflejar los eventos futuros creados antes');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

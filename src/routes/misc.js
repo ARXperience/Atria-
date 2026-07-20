@@ -85,7 +85,21 @@ miscRouter.get('/dashboard', requirePermission('dashboard.view'), async (req, re
   const daysInMonth = Math.max(1, Math.round((now - monthStart) / 86400000) + 1);
   const revpar = sellable > 0 ? roomRevenue / (sellable * daysInMonth) : 0;
 
+  // Señales cruzadas del ecosistema (reputación, eventos, cartera, datos).
+  const [reviews, upcomingEvents, dsrOpen, apOpen] = await Promise.all([
+    prisma.review.findMany({ where: { propertyId }, select: { rating: true, status: true } }),
+    prisma.eventBooking.count({ where: { propertyId, status: { in: ['quote', 'confirmed', 'in_progress'] }, date: { gte: today } } }),
+    prisma.dataSubjectRequest.count({ where: { propertyId, status: { in: ['received', 'in_progress'] } } }),
+    prisma.accountPayable.aggregate({ where: { propertyId, status: 'open' }, _sum: { amount: true } }),
+  ]);
+  const reputationAvg = reviews.length ? Math.round((reviews.reduce((s, r) => s + r.rating, 0) / reviews.length) * 10) / 10 : 0;
+  const reviewsPending = reviews.filter(r => r.status === 'published').length;
+
   res.json({
+    ecosystem: {
+      reputationAvg, reviewsPending, upcomingEvents,
+      dataRequestsOpen: dsrOpen, payableOpen: Math.round(apOpen._sum.amount || 0),
+    },
     date: dayStr(today),
     rooms: { total: totalRooms, occupied: occupiedRooms, outOfService: oosRooms, occupancyPct: Math.round(occupancy * 100) },
     kpis: { adr: Math.round(adr), revpar: Math.round(revpar), monthRevenue: monthPayments._sum.amount || 0, roomNightsSold },
