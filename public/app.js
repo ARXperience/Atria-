@@ -1175,11 +1175,12 @@
   }
 
   async function viewFinance() {
-    const [ov, ar, payables, pl] = await Promise.all([
+    const [ov, ar, payables, pl, summary] = await Promise.all([
       get(`/finance/overview?${pid()}`),
       get(`/finance/receivables?${pid()}`),
       get(`/finance/payables?${pid()}`),
       get(`/finance/report?${pid()}`),
+      get(`/finance/summary?${pid()}`).catch(() => null),
     ]);
     window._apAdd = async () => {
       try { await api('/finance/payables', { method: 'POST', body: { propertyId: state.propertyId, supplierName: $('#apSup').value, concept: $('#apConcept').value, category: $('#apCat').value, amount: +$('#apAmount').value, dueDate: $('#apDue').value || null } }); toast('Cuenta por pagar creada'); render(); }
@@ -1200,6 +1201,9 @@
     setTimeout(animateCounts, 0);
     return `
       <div class="row" style="justify-content:flex-end"><button class="btn ghost small" onclick="_finPrint()">🖨️ Imprimir / PDF</button></div>
+      ${summary ? `<div class="card mt" style="border-left:3px solid var(--accent);background:linear-gradient(90deg,rgba(216,176,100,.08),transparent)">
+        <div class="row" style="align-items:flex-start;gap:10px"><span style="font-size:20px">🤖</span><div><div class="label" style="color:var(--accent);margin-bottom:4px">Copiloto financiero</div><div style="font-size:13.5px;line-height:1.55">${esc(summary.narrative)}</div></div></div>
+      </div>` : ''}
       <div class="grid cols-4 mt">
         <div class="kpi"><div class="label">Ingresos del mes</div><div class="value" style="color:var(--green)"><span data-count="${ov.monthIncome}" data-fmt="cop">$0</span></div></div>
         <div class="kpi"><div class="label">Egresos del mes</div><div class="value"><span data-count="${ov.monthExpenses}" data-fmt="cop">$0</span></div></div>
@@ -1390,6 +1394,15 @@
     };
     window._mkSend = async id => { if (!confirm('¿Enviar esta campaña ahora? Solo llegará a quienes dieron consentimiento.')) return; try { await api(`/marketing/campaigns/${id}/send`, { method: 'POST' }); toast('Campaña enviada'); render(); } catch (e) { toast(e.message, true); } };
     window._mkCancel = async id => { try { await api(`/marketing/campaigns/${id}/cancel`, { method: 'POST' }); toast('Campaña cancelada'); render(); } catch (e) { toast(e.message, true); } };
+    window._mkDraft = async () => {
+      const goal = $('#mkName').value || prompt('¿Cuál es el objetivo de la campaña? (p. ej. promo temporada, fidelizar, reactivar)') || '';
+      try {
+        const d = await api(`/marketing/draft?${pid()}&goal=${encodeURIComponent(goal)}&channel=${$('#mkChannel').value}`);
+        if (d.subject && $('#mkSubject')) $('#mkSubject').value = d.subject;
+        $('#mkMsg').value = d.message;
+        toast('Borrador sugerido por la IA ✨');
+      } catch (e) { toast(e.message, true); }
+    };
     setTimeout(animateCounts, 0);
     return `
       <div class="grid cols-4">
@@ -1407,7 +1420,7 @@
             <div><label>Audiencia</label><select id="mkAud" onchange="_mkPreview()"><option value="guests">Huéspedes</option><option value="leads">Leads</option></select></div>
           </div>
           <div class="mt"><label>Asunto (email)</label><input id="mkSubject" placeholder="Opcional"></div>
-          <div class="mt"><label>Mensaje</label><textarea id="mkMsg" rows="4" placeholder="Escribe el contenido de la campaña…"></textarea></div>
+          <div class="mt"><div class="row" style="justify-content:space-between;align-items:baseline"><label>Mensaje</label><button class="btn ghost small" onclick="_mkDraft()">✨ Sugerir con IA</button></div><textarea id="mkMsg" rows="4" placeholder="Escribe el contenido de la campaña…"></textarea></div>
           <p class="muted mt" id="mkAudInfo" style="font-size:12.5px">Selecciona canal y audiencia para estimar el alcance.</p>
           <div class="row mt">
             <button class="btn ghost" onclick="_mkCreate(false)">Guardar borrador</button>
@@ -2262,7 +2275,15 @@
   }
 
   async function viewAutomations() {
-    const ov = await get(`/automations/overview?${pid()}`);
+    const [ov, suggestions] = await Promise.all([
+      get(`/automations/overview?${pid()}`),
+      get(`/automations/suggestions?${pid()}`).catch(() => []),
+    ]);
+    window._auApplySug = async i => {
+      const s = suggestions[i]; if (!s) return;
+      try { await api('/automations/rules', { method: 'POST', body: { propertyId: state.propertyId, name: s.name, trigger: s.trigger, conditions: s.conditions, actionType: s.actionType, actionParams: s.actionParams } }); toast('Regla creada desde la sugerencia'); render(); }
+      catch (e) { toast(e.message, true); }
+    };
     const trigLabel = Object.fromEntries(ov.triggers.map(t => [t.event, t.label]));
     const actLabel = Object.fromEntries(ov.actions.map(a => [a.type, a.label]));
     window._auAct = null;
@@ -2306,6 +2327,15 @@
         <div class="kpi"><div class="label">Ejecuciones</div><div class="value"><span data-count="${ov.totalRuns}">0</span></div></div>
         <div class="kpi"><div class="label">Disparadores</div><div class="value">${ov.triggers.length}</div></div>
       </div>
+
+      ${suggestions.length ? `<div class="card mt" style="border-left:3px solid var(--accent)">
+        <h3>🤖 Sugerencias del copiloto</h3>
+        <p class="muted" style="font-size:12.5px">Reglas recomendadas según el estado actual de tu sede. Un clic para activarlas.</p>
+        ${suggestions.map((s, i) => `<div class="row" style="justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
+          <div><b>${esc(s.name)}</b><div class="muted" style="font-size:12px">${esc(s.reason)}</div></div>
+          <button class="btn small" onclick="_auApplySug(${i})">Crear</button>
+        </div>`).join('')}
+      </div>` : ''}
 
       <div class="card mt"><h3>Nueva regla</h3>
         <p class="muted">Cuando ocurra un <b>disparador</b>, ejecuta una <b>acción</b>. Solo acciones de bajo riesgo; las sensibles siguen exigiendo aprobación humana.</p>

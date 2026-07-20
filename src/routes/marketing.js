@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
-import { marketingOverview, buildAudience, createCampaign, sendCampaign, cancelCampaign } from '../services/marketing.js';
+import { marketingOverview, buildAudience, createCampaign, sendCampaign, cancelCampaign, draftCampaignMessage } from '../services/marketing.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
 
@@ -20,6 +20,12 @@ marketingRouter.get('/audience', requirePermission('marketing.view'), async (req
     const { eligible, skippedNoConsent } = await buildAudience(req.query.propertyId, { channel: req.query.channel, audience: req.query.audience, segment: req.query.segment });
     res.json({ eligible: eligible.length, skippedNoConsent });
   } catch (err) { badRequest(res, err.message); }
+});
+
+// Redactor asistido (IA) del mensaje de campaña con el tono del hotel.
+marketingRouter.get('/draft', requirePermission('marketing.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await draftCampaignMessage(req.query.propertyId, { goal: req.query.goal, channel: req.query.channel }));
 });
 
 marketingRouter.post('/campaigns', requirePermission('marketing.manage'), async (req, res) => {

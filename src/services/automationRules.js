@@ -111,6 +111,25 @@ export async function testRule(id, samplePayload = {}) {
   return { matched, executed: matched };
 }
 
+// Sugerencias inteligentes de reglas según el estado actual de la sede.
+// No propone reglas ya configuradas (dedupe por disparador + acción).
+export async function suggestRules(propertyId) {
+  const existing = await prisma.automationRule.findMany({ where: { propertyId }, select: { trigger: true, actionType: true } });
+  const has = (t, a) => existing.some(r => r.trigger === t && r.actionType === a);
+  const [negativeReviews, venues, abandoned] = await Promise.all([
+    prisma.review.count({ where: { propertyId, rating: { lte: 2 } } }),
+    prisma.venue.count({ where: { propertyId } }),
+    prisma.reservation.count({ where: { propertyId, status: 'expired' } }),
+  ]);
+  const catalog = [
+    { when: negativeReviews > 0, name: 'Reseña negativa → alertar gerencia', trigger: 'review.created', conditions: [{ field: 'rating', op: 'lt', value: 3 }], actionType: 'notify', actionParams: { role: 'MANAGER', title: 'Reseña negativa', severity: 'warning', body: 'Un huésped dejó una reseña baja: revisar y responder.' }, reason: `Tienes ${negativeReviews} reseña(s) de 2★ o menos sin regla de alerta.` },
+    { when: abandoned > 0, name: 'Reserva abandonada → seguimiento comercial', trigger: 'booking.abandoned', conditions: [], actionType: 'notify', actionParams: { role: 'SALES', title: 'Reserva abandonada', severity: 'warning', body: 'Oportunidad de recuperación: contactar al cliente.' }, reason: `Hay ${abandoned} reserva(s) vencida(s) sin pago: automatiza la recuperación.` },
+    { when: venues > 0, name: 'Evento confirmado → avisar a gerencia', trigger: 'event.confirmed', conditions: [], actionType: 'notify', actionParams: { role: 'MANAGER', title: 'Evento confirmado', severity: 'info' }, reason: 'Tienes salones activos: mantén a gerencia al tanto de cada evento cerrado.' },
+    { when: true, name: 'Huésped extranjero → recordar SIRE', trigger: 'foreign_guest.detected', conditions: [], actionType: 'notify', actionParams: { role: 'FRONTDESK', title: 'Reporte SIRE pendiente', severity: 'warning' }, reason: 'Cumplimiento migratorio: recuerda el SIRE a recepción automáticamente.' },
+  ];
+  return catalog.filter(s => s.when && !has(s.trigger, s.actionType)).map(({ when, ...s }) => s);
+}
+
 export async function automationsOverview(propertyId) {
   const rules = await prisma.automationRule.findMany({ where: { propertyId }, orderBy: { createdAt: 'desc' }, take: 200 });
   return {

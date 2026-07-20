@@ -3,9 +3,45 @@
 import { prisma } from '../db.js';
 import { emitEvent } from '../lib/events.js';
 import { audit } from '../lib/audit.js';
+import { getAgentProfile } from './ai/agentProfile.js';
 
 const CHANNELS = ['email', 'whatsapp', 'sms'];
 const AUDIENCES = ['guests', 'leads'];
+
+// Redactor asistido (IA determinística) con el tono de la persona del hotel.
+// Detecta la intención de la meta y adapta el formato al canal.
+export async function draftCampaignMessage(propertyId, { goal = '', channel = 'email' } = {}) {
+  const prop = await prisma.property.findUnique({ where: { id: propertyId }, select: { name: true } });
+  const profile = await getAgentProfile(propertyId, 'sales').catch(() => null);
+  const hotel = prop?.name || 'nuestro hotel';
+  const cercano = !profile || /cercan|amig|cálid|calid|informal|divertid/i.test(profile.tone || '');
+  const g = (goal || '').toLowerCase();
+  let intent = 'promo';
+  if (/fideliz|vuelv|regres|repet|cliente frecuente/.test(g)) intent = 'loyalty';
+  else if (/event|salón|salon|boda|corporativ|reunión|reunion/.test(g)) intent = 'events';
+  else if (/reactiv|hace tiempo|inactiv|no vien/.test(g)) intent = 'winback';
+  else if (/temporada|vacacion|puente|festiv|fin de semana/.test(g)) intent = 'season';
+
+  const saludo = cercano ? '¡Hola! 👋' : 'Estimado huésped,';
+  const firma = cercano ? `Te esperamos en ${hotel} 💛` : `Cordialmente, el equipo de ${hotel}.`;
+  const cuerpos = {
+    promo: `Tenemos una tarifa especial pensada para ti. Reserva directo con nosotros y aprovecha el mejor precio garantizado.`,
+    loyalty: `Gracias por preferirnos. Como huésped especial, queremos consentirte en tu próxima estadía con un beneficio exclusivo.`,
+    events: `¿Planeas un evento o reunión? En ${hotel} tenemos salones equipados y montajes a tu medida. Cuéntanos tu idea y te armamos una propuesta.`,
+    winback: `¡Te extrañamos! Ha pasado un tiempo desde tu última visita y queremos darte una razón para volver con una oferta especial.`,
+    season: `Se acerca la temporada y las mejores fechas se agotan. Asegura tu estadía en ${hotel} con condiciones preferenciales por reservar con anticipación.`,
+  };
+  const cuerpo = cuerpos[intent];
+  const subject = { promo: `Tarifa especial en ${hotel}`, loyalty: `Un detalle para ti en ${hotel}`, events: `Tu próximo evento en ${hotel}`, winback: `Te extrañamos en ${hotel}`, season: `Reserva tu temporada en ${hotel}` }[intent];
+
+  if (channel === 'sms') {
+    return { subject: null, message: `${hotel}: ${cuerpo.split('.')[0]}. Responde SÍ para más info. Cancela con NO.`.slice(0, 300) };
+  }
+  if (channel === 'whatsapp') {
+    return { subject: null, message: `${saludo}\n\n${cuerpo}\n\n${firma}` };
+  }
+  return { subject, message: `${saludo}\n\n${cuerpo}\n\nEscríbenos o reserva en línea cuando quieras.\n\n${firma}` };
+}
 
 function parseSegment(segment) {
   if (!segment) return {};

@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
-import { financeOverview, accountsReceivable, createPayable, payPayable, profitAndLoss } from '../services/finance.js';
+import { financeOverview, accountsReceivable, createPayable, payPayable, profitAndLoss, financialNarrative } from '../services/finance.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
 
@@ -21,6 +21,12 @@ financeRouter.get('/receivables', requirePermission('finance.view'), async (req,
 financeRouter.get('/report', requirePermission('finance.view'), async (req, res) => {
   if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
   res.json(await profitAndLoss(req.query.propertyId));
+});
+
+// Copiloto financiero: resumen del mes en lenguaje natural con recomendación.
+financeRouter.get('/summary', requirePermission('finance.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await financialNarrative(req.query.propertyId));
 });
 
 // ---- Cuentas por pagar ----

@@ -1567,6 +1567,36 @@ async function main() {
       assert.ok(String(masked.config.apiKey).includes('••'), 'la clave debe mostrarse enmascarada');
     });
 
+    // ===== IA ampliada: redactor, copiloto financiero, sugerencias =====
+    await test('el redactor de campañas adapta el mensaje al canal y objetivo', async () => {
+      const email = await api(`/api/marketing/draft?propertyId=${propertyId}&goal=fidelizar clientes&channel=email`);
+      assert.equal(email.status, 200);
+      assert.ok(email.data.message.length > 40);
+      assert.ok(email.data.subject, 'email debe traer asunto');
+      const sms = await api(`/api/marketing/draft?propertyId=${propertyId}&goal=fidelizar clientes&channel=sms`);
+      assert.equal(sms.data.subject, null, 'sms no lleva asunto');
+      assert.ok(sms.data.message.length <= 300, 'sms debe ser corto');
+    });
+
+    await test('el copiloto financiero resume el mes con recomendación', async () => {
+      const { status, data } = await api(`/api/finance/summary?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(data.narrative.includes('ingresos') || data.narrative.includes('resultado'));
+      assert.ok(data.narrative.includes('💡'), 'debe incluir una recomendación accionable');
+      assert.ok(['positive', 'negative'].includes(data.sentiment));
+    });
+
+    await test('el copiloto sugiere reglas y no repite las ya creadas', async () => {
+      const before = await api(`/api/automations/suggestions?propertyId=${propertyId}`);
+      assert.equal(before.status, 200);
+      assert.ok(Array.isArray(before.data));
+      const sug = before.data.find(s => s.trigger === 'foreign_guest.detected');
+      assert.ok(sug, 'debe sugerir el recordatorio SIRE');
+      await api('/api/automations/rules', { method: 'POST', body: { propertyId, name: sug.name, trigger: sug.trigger, conditions: sug.conditions, actionType: sug.actionType, actionParams: sug.actionParams } });
+      const after = await api(`/api/automations/suggestions?propertyId=${propertyId}`);
+      assert.ok(!after.data.some(s => s.trigger === 'foreign_guest.detected' && s.actionType === sug.actionType), 'la sugerencia aplicada ya no debe aparecer');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

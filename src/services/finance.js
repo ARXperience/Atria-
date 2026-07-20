@@ -1,7 +1,31 @@
 // Atria Finance (§28): cartera (CxC), cuentas por pagar (CxP) y reportes.
 // Agrega las transacciones reales de pagos, facturas, nómina, compras y POS.
 import { prisma } from '../db.js';
-import { money } from '../lib/util.js';
+import { money, fmtCOP } from '../lib/util.js';
+
+// Copiloto financiero (IA determinística): resume el mes en lenguaje natural
+// con una recomendación accionable, usando solo datos que el rol puede ver.
+export async function financialNarrative(propertyId) {
+  const ov = await financeOverview(propertyId);
+  const prop = await prisma.property.findUnique({ where: { id: propertyId }, select: { name: true } });
+  const hotel = prop?.name || 'la sede';
+  const mes = new Date().toLocaleDateString('es-CO', { month: 'long' });
+  const positivo = ov.monthNet >= 0;
+  const margen = ov.monthIncome > 0 ? Math.round((ov.monthNet / ov.monthIncome) * 100) : 0;
+  const partes = [];
+  partes.push(`En ${mes}, ${hotel} registra ingresos por ${fmtCOP(ov.monthIncome)} y egresos por ${fmtCOP(ov.monthExpenses)}, con un resultado ${positivo ? 'positivo' : 'negativo'} de ${fmtCOP(Math.abs(ov.monthNet))}${ov.monthIncome > 0 ? ` (margen ${margen}%)` : ''}.`);
+  if (ov.receivable > 0) partes.push(`Tienes ${fmtCOP(ov.receivable)} en cartera por cobrar: priorizar su recaudo mejora la liquidez de inmediato.`);
+  else partes.push(`No hay cartera por cobrar pendiente: excelente gestión de recaudo.`);
+  if (ov.payableOpen > 0) partes.push(`Quedan ${fmtCOP(ov.payableOpen)} en cuentas por pagar abiertas; programa los pagos para no afectar la relación con proveedores.`);
+  // Recomendación accionable
+  let consejo;
+  if (!positivo) consejo = 'El mes va en rojo: revisa los egresos más grandes (nómina y compras) y acelera el cobro de cartera.';
+  else if (ov.receivable > ov.monthNet) consejo = 'La cartera supera tu utilidad del mes: convertirla en caja es tu mayor palanca ahora.';
+  else if (margen < 15) consejo = 'El margen es ajustado: evalúa tu estrategia de tarifas (revenue) o renegocia compras.';
+  else consejo = 'Vas bien: mantén el control de gastos y considera reinvertir en ocupación (marketing) o experiencia.';
+  partes.push(`💡 ${consejo}`);
+  return { narrative: partes.join(' '), sentiment: positivo ? 'positive' : 'negative', overview: ov };
+}
 
 function monthStart() {
   const n = new Date();

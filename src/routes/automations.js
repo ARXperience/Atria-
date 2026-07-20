@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
-import { automationsOverview, TRIGGERS, ACTIONS, createRule, toggleRule, testRule } from '../services/automationRules.js';
+import { automationsOverview, TRIGGERS, ACTIONS, createRule, toggleRule, testRule, suggestRules } from '../services/automationRules.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
 
@@ -15,6 +15,12 @@ automationsRouter.get('/catalog', requirePermission('automations.view'), (_req, 
 automationsRouter.get('/overview', requirePermission('automations.view'), async (req, res) => {
   if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
   res.json(await automationsOverview(req.query.propertyId));
+});
+
+// Sugerencias de reglas según el estado actual de la sede (IA).
+automationsRouter.get('/suggestions', requirePermission('automations.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await suggestRules(req.query.propertyId));
 });
 
 automationsRouter.post('/rules', requirePermission('automations.manage'), async (req, res) => {

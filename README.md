@@ -30,7 +30,7 @@ npm start                # http://localhost:4000
 > contraseñas tras el primer arranque, y usa correos reales. Nunca reutilices esta
 > contraseña en cuentas reales.
 
-**Pruebas end-to-end**: `npm test` (167 pruebas de los flujos críticos de la sección 48 del documento).
+**Pruebas end-to-end**: `npm test` (170 pruebas de los flujos críticos de la sección 48 del documento).
 
 ## 📱 Vincular WhatsApp (Baileys)
 
@@ -153,7 +153,7 @@ src/
   routes/              # API REST por módulo
 prisma/schema.prisma   # modelo de datos completo
 public/                # panel admin + pay + guest + chat
-test/smoke.test.js     # 167 pruebas end-to-end
+test/smoke.test.js     # 170 pruebas end-to-end
 ```
 
 > ⚠️ Los valores legales sembrados (SMMLV, UVT, etc.) son **ejemplos**: actualízalos en Configuración → Parámetros legales con las fuentes oficiales vigentes antes de usar en producción. Este software apoya el cumplimiento operativo pero no reemplaza asesoría legal/contable.
