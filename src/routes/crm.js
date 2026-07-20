@@ -138,6 +138,21 @@ crmRouter.post('/leads/rescore', requirePermission('crm.edit'), async (req, res)
   res.json(await rescoreAllLeads(req.body.propertyId, { user: req.user }));
 });
 
+// ---- Predicción de fuga (churn) + win-back (§12/§36) ----
+crmRouter.get('/churn', requirePermission('crm.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const { churnOverview } = await import('../services/ai/churn.js');
+  res.json(await churnOverview(req.query.propertyId));
+});
+
+crmRouter.post('/churn/winback', requirePermission('marketing.manage'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try {
+    const { launchWinback } = await import('../services/ai/churn.js');
+    res.status(201).json(await launchWinback(req.body.propertyId, { discountPct: +req.body?.discountPct || 0.15, inactiveDays: +req.body?.inactiveDays || 120, channel: req.body?.channel || 'email', user: req.user }));
+  } catch (err) { badRequest(res, err.message); }
+});
+
 // ---- Segmentos de huéspedes (§12/§36) ----
 crmRouter.get('/segments', requirePermission('crm.view'), async (req, res) => {
   if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });

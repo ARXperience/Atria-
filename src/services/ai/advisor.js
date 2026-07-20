@@ -68,9 +68,12 @@ async function retentionUpsellSignals(propertyId) {
     const arrivals = await prisma.reservation.count({ where: { propertyId, status: 'confirmed', checkIn: { gte: a, lt: b } } });
     const noPre = await prisma.reservation.count({ where: { propertyId, status: 'confirmed', checkIn: { gte: a, lt: b }, precheckinAt: null } });
     if (noPre > 0) out.push({ area: 'guest', permission: 'reservations.view', severity: 'info', title: `${noPre} de ${arrivals} llegada(s) de hoy sin pre-check-in`, detail: `Enviar el enlace de pre-check-in agiliza la recepción y habilita upsell (upgrade, late checkout, room service).`, action: 'Enviar pre-check-in desde el portal del huésped.', metric: noPre });
-    // Reactivación: huéspedes con estadías previas e inactivos > 120 días con consentimiento.
-    const consented = await prisma.guest.count({ where: { propertyId, marketingConsent: true } });
-    if (consented >= 5) out.push({ area: 'marketing', permission: 'marketing.view', severity: 'info', title: `${consented} huésped(es) contactables para reactivación`, detail: `Puedes crear un segmento de inactivos y una campaña con cupón para recuperarlos.`, action: 'CRM → Segmentos (inactivos) → campaña con cupón.', metric: consented });
+  } catch { /* */ }
+  // Riesgo de fuga (churn): huéspedes en riesgo alto y contactables → win-back.
+  try {
+    const { churnOverview } = await import('./churn.js');
+    const ch = await churnOverview(propertyId);
+    if (ch.counts.high > 0) out.push({ area: 'marketing', permission: 'marketing.view', severity: ch.counts.high >= 5 ? 'warning' : 'info', title: `${ch.counts.high} huésped(es) en riesgo alto de fuga`, detail: `${ch.reachableAtRisk} en riesgo son contactables. Una campaña win-back con cupón puede recuperarlos.`, action: 'CRM → Riesgo de fuga → Lanzar win-back.', metric: ch.counts.high });
   } catch { /* */ }
   return out;
 }

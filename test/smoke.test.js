@@ -421,6 +421,35 @@ async function main() {
       assert.ok(!data.some(x => x.id === segmentId), 'ya no aparece');
     });
 
+    // ===== Predicción de fuga (churn) + win-back (§12/§36) =====
+    await test('el scoring de churn distingue riesgo alto y bajo', async () => {
+      const { scoreChurn } = await import('../src/services/ai/churn.js');
+      const hi = scoreChurn({ stays: 1, daysSince: 400, hasNegative: true, lowNps: false });
+      assert.equal(hi.tier, 'high');
+      assert.ok(hi.reasons.length >= 2, 'explica los motivos del riesgo');
+      const lo = scoreChurn({ stays: 4, daysSince: 30, hasNegative: false, lowNps: false });
+      assert.equal(lo.tier, 'low');
+    });
+
+    await test('el overview de churn devuelve conteos y lista de en-riesgo', async () => {
+      const { status, data } = await api(`/api/crm/churn?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok('counts' in data && Array.isArray(data.atRisk));
+      assert.ok(typeof data.reachableAtRisk === 'number' && typeof data.total === 'number');
+    });
+
+    await test('lanzar win-back crea cupón, segmento y campaña de reactivación', async () => {
+      const { status, data } = await api('/api/crm/churn/winback', { method: 'POST', body: { propertyId, discountPct: 0.15, inactiveDays: 120 } });
+      assert.equal(status, 201);
+      assert.equal(data.coupon.code, 'WINBACK15');
+      assert.ok(data.campaign && data.campaign.id, 'crea la campaña');
+      assert.ok(data.segment && data.segment.id, 'crea el segmento de inactivos');
+      // El cupón queda atribuido a la campaña para medir ROI.
+      const coupons = await api(`/api/marketing/coupons?propertyId=${propertyId}`);
+      const c = coupons.data.coupons.find(x => x.code === 'WINBACK15');
+      assert.equal(c.campaignId, data.campaign.id, 'el cupón se atribuye a la campaña win-back');
+    });
+
     // ===== Cupones + ROI de campañas (§36) =====
     let campaignForRoi, couponId, couponCode = 'VERANO20';
     await test('crear una campaña y un cupón atribuido a ella', async () => {

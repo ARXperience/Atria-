@@ -762,12 +762,19 @@
   }
 
   async function viewCrm() {
-    const [leads, segments] = await Promise.all([
+    const [leads, segments, churn] = await Promise.all([
       get(`/crm/leads?${pid()}`),
       get(`/crm/segments?${pid()}`).catch(() => []),
+      get(`/crm/churn?${pid()}`).catch(() => ({ counts: { high: 0, medium: 0, low: 0 }, atRisk: [], reachableAtRisk: 0, total: 0 })),
     ]);
     // Ordena por score descendente para priorizar la gestión comercial.
     leads.sort((a, b) => (b.score || 0) - (a.score || 0));
+    window._winback = async () => {
+      if (!confirm('Se creará un cupón, un segmento de inactivos y una campaña (borrador) de reactivación. ¿Continuar?')) return;
+      try { const { data } = await api('/crm/churn/winback', { method: 'POST', body: { propertyId: state.propertyId, discountPct: 0.15, inactiveDays: 120 } }); toast(`Win-back creado: cupón ${data.coupon.code} + campaña para ${data.segment.count} huésped(es)`); location.hash = '#marketing'; }
+      catch (err) { toast(err.message, true); }
+    };
+    const tierBadge = t => t === 'high' ? badge('alto', 'red') : t === 'medium' ? badge('medio', 'yellow') : badge('bajo', 'gray');
     window._leadStage = async (id, stage) => {
       try { await api(`/crm/leads/${id}`, { method: 'PATCH', body: { stage } }); toast('Lead actualizado'); render(); }
       catch (err) { toast(err.message, true); }
@@ -847,6 +854,23 @@
         ${segments.map(s => `<tr><td><b>${esc(s.name)}</b>${s.description ? `<div class="muted" style="font-size:11px">${esc(s.description)}</div>` : ''}</td>
           <td class="muted" style="font-size:11.5px">${esc(Object.entries(s.criteria).map(([k, v]) => `${k}: ${v}`).join(', ') || '—')}</td>
           <td><b>${s.count}</b></td><td><button class="btn small ghost" onclick="_segDel('${s.id}')">✕</button></td></tr>`).join('')}</table>` : '<p class="muted">Sin segmentos. Crea uno para segmentar tu base.</p>'}
+    </div>
+
+    <div class="card mt" ${churn.counts.high ? 'style="border-left:3px solid var(--red)"' : ''}><div style="display:flex;justify-content:space-between;align-items:center">
+      <h3>🔮 Riesgo de fuga (churn)</h3>
+      ${churn.reachableAtRisk ? `<button class="btn small" onclick="_winback()">Lanzar win-back</button>` : ''}</div>
+      <p class="muted" style="font-size:12px">Predicción de qué huéspedes podrían no volver, según recencia, frecuencia e insatisfacción. Lanza una campaña de reactivación con un clic.</p>
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Riesgo alto</div><div class="value" style="color:${churn.counts.high ? 'var(--red)' : 'inherit'}">${churn.counts.high}</div></div>
+        <div class="kpi"><div class="label">Riesgo medio</div><div class="value" style="color:${churn.counts.medium ? 'var(--yellow)' : 'inherit'}">${churn.counts.medium}</div></div>
+        <div class="kpi"><div class="label">Contactables en riesgo</div><div class="value">${churn.reachableAtRisk}</div></div>
+        <div class="kpi"><div class="label">Base con historial</div><div class="value">${churn.total}</div></div>
+      </div>
+      ${churn.atRisk.length ? `<table class="mt"><tr><th>Huésped</th><th>Estadías</th><th>Últ. estadía</th><th>Riesgo</th><th>Motivos</th><th>Contactable</th></tr>
+        ${churn.atRisk.slice(0, 15).map(g => `<tr><td>${esc(g.name)}</td><td>${g.stays}</td><td class="muted" style="font-size:12px">${g.daysSince != null ? `hace ${g.daysSince}d` : '—'}</td>
+          <td>${tierBadge(g.tier)} <span class="muted" style="font-size:11px">${g.risk}</span></td>
+          <td class="muted" style="font-size:11px;max-width:240px">${esc((g.reasons || []).join(' · '))}</td>
+          <td>${g.reachable ? '✅' : '—'}</td></tr>`).join('')}</table>` : '<p class="muted mt">Aún no hay huéspedes con historial suficiente para evaluar la fuga.</p>'}
     </div>`;
   }
 
