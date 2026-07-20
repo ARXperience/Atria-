@@ -301,12 +301,31 @@ model KnowledgeItem {
   visibility String   @default("public") // public | internal
   tags       String?  // CSV para recuperación
   active     Boolean  @default(true)
+  version    Int      @default(1)
+  validFrom  DateTime?
   validUntil DateTime?
   updatedBy  String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+  revisions  KnowledgeRevision[]
 
   @@index([propertyId, visibility, active])
+}
+
+// Historial de versiones de un ítem de conocimiento (vigencia, §55.5)
+model KnowledgeRevision {
+  id              String   @id @default(cuid())
+  knowledgeItemId String
+  knowledgeItem   KnowledgeItem @relation(fields: [knowledgeItemId], references: [id])
+  propertyId      String
+  version         Int
+  title           String
+  content         String
+  tags            String?
+  editedBy        String?
+  createdAt       DateTime @default(now())
+
+  @@index([knowledgeItemId, version])
 }
 
 model Room {

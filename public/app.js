@@ -1196,9 +1196,10 @@
   }
 
   async function viewContent() {
-    const [rooms, knowledge] = await Promise.all([
+    const [rooms, knowledge, review] = await Promise.all([
       get(`/content/rooms?${pid()}`),
       get(`/content/knowledge?${pid()}`),
+      get(`/content/knowledge-review?${pid()}`).catch(() => ({ counts: {}, expired: [], expiringSoon: [] })),
     ]);
     window._editRoom = r => {
       const room = rooms.find(x => x.id === r);
@@ -1251,6 +1252,7 @@
         await api('/content/knowledge', { method: 'POST', body: {
           propertyId: state.propertyId, category: $('#kCat').value, title: $('#kTitle').value,
           content: $('#kContent').value, visibility: $('#kVis').value, tags: $('#kTags').value,
+          validUntil: $('#kValid').value || null,
         }});
         toast('Conocimiento agregado'); render();
       } catch (err) { toast(err.message, true); }
@@ -1260,6 +1262,25 @@
       try { await api(`/content/knowledge/${id}`, { method: 'DELETE' }); toast('Ítem desactivado'); render(); }
       catch (err) { toast(err.message, true); }
     };
+    window._editKnow = k => {
+      const m = modal(`<h2>Editar conocimiento — v${k.version}</h2>
+        <label>Título</label><input id="ekTitle" value="${esc(k.title)}">
+        <label>Contenido</label><textarea id="ekContent" rows="3">${esc(k.content)}</textarea>
+        <label>Etiquetas</label><input id="ekTags" value="${esc(k.tags || '')}">
+        <div class="row"><div><label>Vigente hasta</label><input id="ekValid" type="date" value="${k.validUntil ? String(k.validUntil).slice(0, 10) : ''}"></div></div>
+        <div class="row mt"><button class="btn fit" id="ekSave">Guardar (nueva versión)</button><button class="btn secondary fit" id="ekHist">Ver historial</button></div>
+        <div id="ekHistBox" class="mt"></div>`);
+      m.querySelector('#ekSave').onclick = async () => {
+        try { await api(`/content/knowledge/${k.id}`, { method: 'PATCH', body: { title: m.querySelector('#ekTitle').value, content: m.querySelector('#ekContent').value, tags: m.querySelector('#ekTags').value, validUntil: m.querySelector('#ekValid').value || null } }); toast('Actualizado'); m.remove(); render(); }
+        catch (err) { toast(err.message, true); }
+      };
+      m.querySelector('#ekHist').onclick = async () => {
+        const revs = await get(`/content/knowledge/${k.id}/revisions`);
+        m.querySelector('#ekHistBox').innerHTML = `<h3>Historial de versiones</h3><table><tr><th>Ver.</th><th>Título</th><th>Editado por</th><th>Fecha</th></tr>${revs.map(r => `<tr><td>v${r.version}</td><td>${esc(r.title)}</td><td class="muted">${esc(r.editedBy || '—')}</td><td class="muted" style="font-size:12px">${dt(r.createdAt)}</td></tr>`).join('')}</table>`;
+      };
+    };
+    const kExpired = new Set((review.expired || []).map(x => x.id));
+    const kSoon = new Set((review.expiringSoon || []).map(x => x.id));
     return `
       <div class="card"><h3>Habitaciones — contenido que alimenta al agente y la web</h3>
         <p class="muted" style="font-size:12.5px;margin-bottom:12px">Mientras más completa esté cada habitación (descripción, camas, fotos, amenidades), mejor responderá Atria IA a los huéspedes.</p>
@@ -1274,21 +1295,25 @@
         </div>
       </div>
       <div class="card"><h3>Base de conocimiento (FAQs, servicios, ubicación)</h3>
-        <p class="muted" style="font-size:12.5px">Lo <b>público</b> lo usa el agente de huéspedes; lo <b>interno</b>, los asistentes del equipo.</p>
+        <p class="muted" style="font-size:12.5px">Lo <b>público</b> lo usa el agente de huéspedes; lo <b>interno</b>, los asistentes del equipo. El conocimiento <b>vencido</b> deja de estar disponible para la IA automáticamente.</p>
+        ${(review.counts?.expired || review.counts?.expiringSoon) ? `<div class="mt" style="padding:10px 12px;border-radius:var(--r-sm);background:var(--surface-2);border:1px solid var(--border);font-size:12.5px">
+          ${review.counts.expired ? `<span style="color:var(--red)">⚠️ ${review.counts.expired} ítem(s) vencido(s)</span>` : ''}${review.counts.expired && review.counts.expiringSoon ? ' · ' : ''}${review.counts.expiringSoon ? `<span style="color:var(--yellow)">⏳ ${review.counts.expiringSoon} por vencer (30 días)</span>` : ''} — revisa su vigencia.</div>` : ''}
         <div class="row mt">
           <div><label>Categoría</label><select id="kCat"><option value="faq">FAQ</option><option value="service">Servicio</option><option value="location">Ubicación</option><option value="amenity">Amenidad</option><option value="attraction">Atracción cercana</option><option value="general">General</option></select></div>
           <div><label>Visibilidad</label><select id="kVis"><option value="public">Pública</option><option value="internal">Interna</option></select></div>
           <div><label>Título</label><input id="kTitle" placeholder="¿Tienen parqueadero?"></div>
           <div><label>Etiquetas</label><input id="kTags" placeholder="parqueo, carro"></div>
+          <div><label>Vigente hasta</label><input id="kValid" type="date"></div>
         </div>
         <label>Contenido / respuesta</label><textarea id="kContent" rows="2" placeholder="Sí, contamos con parqueadero cubierto sin costo para huéspedes."></textarea>
         <button class="btn small mt" onclick="_addKnow()">Agregar</button>
-        <table class="mt"><tr><th>Categoría</th><th>Título</th><th>Visibilidad</th><th>Contenido</th><th></th></tr>
+        <table class="mt"><tr><th>Categoría</th><th>Título</th><th>Visibilidad</th><th>Vigencia</th><th>Contenido</th><th></th></tr>
         ${knowledge.map(k => `<tr>
-          <td>${esc(k.category)}</td><td>${esc(k.title)}</td>
+          <td>${esc(k.category)}</td><td>${esc(k.title)} ${k.version > 1 ? `<span class="muted" style="font-size:10px">v${k.version}</span>` : ''}</td>
           <td>${k.visibility === 'public' ? badge('pública', 'green') : badge('interna', 'yellow')}${k.active ? '' : ' ' + badge('inactiva', 'gray')}</td>
-          <td class="muted" style="font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.content)}</td>
-          <td>${k.active ? `<button class="btn small danger" onclick="_delKnow('${k.id}')">Quitar</button>` : ''}</td>
+          <td>${kExpired.has(k.id) ? badge('vencida', 'red') : kSoon.has(k.id) ? badge('por vencer', 'yellow') : k.validUntil ? `<span class="muted" style="font-size:11px">${day(k.validUntil)}</span>` : '<span class="muted">—</span>'}</td>
+          <td class="muted" style="font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.content)}</td>
+          <td>${k.active ? `<button class="btn small secondary" onclick='_editKnow(${JSON.stringify(k).replace(/'/g, "&#39;")})'>Editar</button> <button class="btn small danger" onclick="_delKnow('${k.id}')">Quitar</button>` : ''}</td>
         </tr>`).join('')}</table>
         ${knowledge.length ? '' : '<p class="muted mt">Sin conocimiento aún. Agrega FAQs, servicios y datos del hotel para que el agente responda con precisión.</p>'}
       </div>`;

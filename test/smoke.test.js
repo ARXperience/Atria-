@@ -979,6 +979,41 @@ async function main() {
       assert.ok(pub.data.rooms.length >= 3 && pub.data.hotel.name, 'el snapshot trae habitaciones y datos del hotel');
     });
 
+    // ===== Conocimiento: vigencia + versionado + RAG (§55.5) =====
+    let versionedKnowId;
+    await test('el conocimiento vencido no llega al snapshot del agente', async () => {
+      const past = new Date(Date.now() - 2 * 86400000).toISOString();
+      await api('/api/content/knowledge', { method: 'POST', body: { propertyId, category: 'service', title: 'Promo vencida', content: 'Descuento que ya expiró.', visibility: 'public', validUntil: past } });
+      const future = new Date(Date.now() + 30 * 86400000).toISOString();
+      const vig = await api('/api/content/knowledge', { method: 'POST', body: { propertyId, category: 'service', title: 'Promo vigente', content: 'Descuento activo esta temporada.', visibility: 'public', validUntil: future } });
+      versionedKnowId = vig.data.id;
+      const snap = await api(`/api/content/knowledge-snapshot?propertyId=${propertyId}&visibility=public`);
+      const titles = snap.data.knowledge.map(k => k.title);
+      assert.ok(titles.includes('Promo vigente'), 'el vigente sí aparece');
+      assert.ok(!titles.includes('Promo vencida'), 'el vencido NO aparece para la IA');
+    });
+
+    await test('el panel de vigencia detecta vencidos y por vencer', async () => {
+      const { status, data } = await api(`/api/content/knowledge-review?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(data.counts.expired >= 1, 'detecta al menos un vencido');
+      assert.ok(data.counts.expiringSoon >= 1, 'detecta al menos uno por vencer');
+    });
+
+    await test('editar un ítem crea una nueva versión con historial', async () => {
+      const upd = await api(`/api/content/knowledge/${versionedKnowId}`, { method: 'PATCH', body: { content: 'Descuento actualizado al 25%.' } });
+      assert.equal(upd.data.version, 2, 'la versión sube a 2');
+      const revs = await api(`/api/content/knowledge/${versionedKnowId}/revisions`);
+      assert.equal(revs.data.length, 2, 'hay dos versiones en el historial');
+      assert.equal(revs.data[0].version, 2);
+    });
+
+    await test('la recuperación RAG devuelve fragmentos relevantes', async () => {
+      const { data } = await api('/api/content/agents/preview', { method: 'POST', body: { propertyId, scope: 'guest', question: '¿tienen dónde dejar el carro?' } });
+      assert.ok(Array.isArray(data.sources), 'devuelve fuentes RAG');
+      assert.ok(data.sources.some(s => /parqueadero/i.test(s.title || s.answer)), 'recupera el ítem de parqueadero por coincidencia parcial (carro/parqueo)');
+    });
+
     await test('contenido público de habitaciones sin autenticación (para la web)', async () => {
       const res = await fetch(`${BASE}/api/public/hotel/${propertyId}/rooms`);
       assert.equal(res.status, 200);

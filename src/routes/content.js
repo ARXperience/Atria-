@@ -2,9 +2,9 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
-import { roomsContent, updateRoomTypeContent, listKnowledge, knowledgeSnapshot } from '../services/knowledge.js';
+import { roomsContent, updateRoomTypeContent, listKnowledge, knowledgeSnapshot, createKnowledgeItem, updateKnowledgeItem, listKnowledgeRevisions, knowledgeReview } from '../services/knowledge.js';
 import { getAgentProfile, buildSystemPrompt, AGENT_SCOPES } from '../services/ai/agentProfile.js';
-import { searchKnowledge } from '../services/ai/retrieval.js';
+import { searchKnowledge, retrieveContext } from '../services/ai/retrieval.js';
 import { buildTools } from '../services/ai/tools.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
@@ -38,6 +38,7 @@ contentRouter.post('/agents/preview', requirePermission('content.view'), async (
   const snapshot = await knowledgeSnapshot(propertyId, { visibility: profile.knowledgeScope });
   const tools = buildTools({ propertyId, profile, conversation: null });
   const answer = question ? searchKnowledge(snapshot, question) : null;
+  const context = question ? retrieveContext(snapshot, question, { k: 3 }) : [];
   res.json({
     displayName: profile.displayName,
     tools: Object.keys(tools),
@@ -45,6 +46,7 @@ contentRouter.post('/agents/preview', requirePermission('content.view'), async (
     knowledgeItems: snapshot.knowledge.length,
     systemPromptPreview: buildSystemPrompt(profile, snapshot).slice(0, 1200),
     answer: answer ? answer.answer : (question ? 'El agente no encontró esta información en el conocimiento configurado — pediría más datos o escalaría a una persona.' : null),
+    sources: context, // fragmentos recuperados que respaldan la respuesta (RAG)
   });
 });
 
@@ -71,12 +73,10 @@ contentRouter.get('/knowledge', requirePermission('content.view'), async (req, r
 });
 
 contentRouter.post('/knowledge', requirePermission('content.manage'), async (req, res) => {
-  const { propertyId, category, title, content, visibility = 'public', tags } = req.body || {};
+  const { propertyId, category, title, content, visibility = 'public', tags, validFrom, validUntil } = req.body || {};
   if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
   if (!category || !title || !content) return badRequest(res, 'category, title y content son requeridos');
-  const item = await prisma.knowledgeItem.create({
-    data: { propertyId, category, title, content, visibility, tags, updatedBy: req.user.name },
-  });
+  const item = await createKnowledgeItem({ propertyId, category, title, content, visibility, tags, validFrom, validUntil, user: req.user });
   await audit({ propertyId, user: req.user, action: 'knowledge.created', entity: 'KnowledgeItem', entityId: item.id, after: { category, title } });
   res.status(201).json(item);
 });
@@ -84,12 +84,24 @@ contentRouter.post('/knowledge', requirePermission('content.manage'), async (req
 contentRouter.patch('/knowledge/:id', requirePermission('content.manage'), async (req, res) => {
   const item = await prisma.knowledgeItem.findUnique({ where: { id: req.params.id } });
   if (!item || !propertyScope(req, item.propertyId)) return res.status(404).json({ error: 'Ítem no encontrado' });
-  const allowed = ['category', 'title', 'content', 'visibility', 'tags', 'active'];
-  const data = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
-  data.updatedBy = req.user.name;
-  const updated = await prisma.knowledgeItem.update({ where: { id: item.id }, data });
-  await audit({ propertyId: item.propertyId, user: req.user, action: 'knowledge.updated', entity: 'KnowledgeItem', entityId: item.id, after: data });
-  res.json(updated);
+  try {
+    const updated = await updateKnowledgeItem(item.id, { ...req.body, user: req.user });
+    await audit({ propertyId: item.propertyId, user: req.user, action: 'knowledge.updated', entity: 'KnowledgeItem', entityId: item.id, after: { version: updated.version } });
+    res.json(updated);
+  } catch (err) { badRequest(res, err.message); }
+});
+
+// Historial de versiones de un ítem (vigencia §55.5)
+contentRouter.get('/knowledge/:id/revisions', requirePermission('content.view'), async (req, res) => {
+  const item = await prisma.knowledgeItem.findUnique({ where: { id: req.params.id } });
+  if (!item || !propertyScope(req, item.propertyId)) return res.status(404).json({ error: 'Ítem no encontrado' });
+  res.json(await listKnowledgeRevisions(item.id));
+});
+
+// Panel de vigencia: vencidos y por vencer
+contentRouter.get('/knowledge-review', requirePermission('content.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await knowledgeReview(req.query.propertyId, { withinDays: +req.query.withinDays || 30 }));
 });
 
 contentRouter.delete('/knowledge/:id', requirePermission('content.manage'), async (req, res) => {

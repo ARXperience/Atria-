@@ -44,11 +44,74 @@ export async function updateRoomTypeContent(roomTypeId, data) {
 }
 
 // ---- Base de conocimiento ----
-export async function listKnowledge(propertyId, { visibility = null, activeOnly = true } = {}) {
+// Un ítem está vigente si está activo, ya empezó su vigencia y no ha expirado.
+export function isCurrent(item, now = new Date()) {
+  if (!item.active) return false;
+  if (item.validFrom && item.validFrom > now) return false;
+  if (item.validUntil && item.validUntil < now) return false;
+  return true;
+}
+
+export async function listKnowledge(propertyId, { visibility = null, activeOnly = true, currentOnly = false } = {}) {
   const where = { propertyId };
   if (visibility) where.visibility = visibility;
   if (activeOnly) where.active = true;
-  return prisma.knowledgeItem.findMany({ where, orderBy: [{ category: 'asc' }, { title: 'asc' }] });
+  const items = await prisma.knowledgeItem.findMany({ where, orderBy: [{ category: 'asc' }, { title: 'asc' }] });
+  if (currentOnly) { const now = new Date(); return items.filter(i => isCurrent(i, now)); }
+  return items;
+}
+
+// Crea un ítem con su primera versión.
+export async function createKnowledgeItem({ propertyId, category, title, content, visibility = 'public', tags = null, validFrom = null, validUntil = null, user = null }) {
+  return prisma.knowledgeItem.create({
+    data: {
+      propertyId, category, title, content, visibility, tags, updatedBy: user?.name || null,
+      validFrom: validFrom ? new Date(validFrom) : null,
+      validUntil: validUntil ? new Date(validUntil) : null,
+      revisions: { create: { propertyId, version: 1, title, content, tags, editedBy: user?.name || null } },
+    },
+  });
+}
+
+// Actualiza un ítem versionando la copia anterior (historial de vigencia).
+export async function updateKnowledgeItem(id, { user = null, ...fields }) {
+  const item = await prisma.knowledgeItem.findUnique({ where: { id } });
+  if (!item) throw new Error('Ítem no encontrado');
+  const data = {};
+  for (const k of ['category', 'title', 'content', 'visibility', 'tags', 'active']) if (fields[k] !== undefined) data[k] = fields[k];
+  if (fields.validFrom !== undefined) data.validFrom = fields.validFrom ? new Date(fields.validFrom) : null;
+  if (fields.validUntil !== undefined) data.validUntil = fields.validUntil ? new Date(fields.validUntil) : null;
+  data.updatedBy = user?.name || null;
+  // Solo se crea una nueva versión si cambió el contenido sustantivo.
+  const contentChanged = ['title', 'content', 'tags'].some(k => data[k] !== undefined && data[k] !== item[k]);
+  if (contentChanged) {
+    data.version = item.version + 1;
+    return prisma.knowledgeItem.update({
+      where: { id },
+      data: { ...data, revisions: { create: { propertyId: item.propertyId, version: item.version + 1, title: data.title ?? item.title, content: data.content ?? item.content, tags: data.tags ?? item.tags, editedBy: user?.name || null } } },
+    });
+  }
+  return prisma.knowledgeItem.update({ where: { id }, data });
+}
+
+export async function listKnowledgeRevisions(itemId) {
+  return prisma.knowledgeRevision.findMany({ where: { knowledgeItemId: itemId }, orderBy: { version: 'desc' }, take: 50 });
+}
+
+// Panel de vigencia: ítems vencidos y por vencer (dentro de N días).
+export async function knowledgeReview(propertyId, { withinDays = 30 } = {}) {
+  const items = await prisma.knowledgeItem.findMany({ where: { propertyId, active: true } });
+  const now = new Date();
+  const soon = new Date(now.getTime() + withinDays * 86400_000);
+  const expired = [];
+  const expiringSoon = [];
+  const notYetValid = [];
+  for (const i of items) {
+    if (i.validUntil && i.validUntil < now) expired.push(i);
+    else if (i.validUntil && i.validUntil <= soon) expiringSoon.push(i);
+    if (i.validFrom && i.validFrom > now) notYetValid.push(i);
+  }
+  return { expired, expiringSoon, notYetValid, counts: { expired: expired.length, expiringSoon: expiringSoon.length, notYetValid: notYetValid.length } };
 }
 
 // Snapshot de conocimiento que consumirá el agente (IA-3): contenido de
@@ -58,6 +121,7 @@ export async function knowledgeSnapshot(propertyId, { visibility = 'public' } = 
   const rooms = await roomsContent(propertyId);
   const items = await listKnowledge(propertyId, {
     visibility: visibility === 'internal' ? null : 'public', // interno ve todo; externo solo público
+    currentOnly: true, // el agente nunca ve conocimiento vencido o aún no vigente (§55.5)
   });
   const policies = await prisma.hotelPolicy.findMany({ where: { propertyId, active: true } });
   return {
@@ -67,7 +131,7 @@ export async function knowledgeSnapshot(propertyId, { visibility = 'public' } = 
       currency: property?.currency,
     },
     rooms,
-    knowledge: items.map(i => ({ category: i.category, title: i.title, content: i.content, tags: i.tags })),
+    knowledge: items.map(i => ({ category: i.category, title: i.title, content: i.content, tags: i.tags, updatedAt: i.updatedAt })),
     policies: policies.map(p => ({ type: p.type, title: p.title, text: p.publicText || p.conditions })),
   };
 }
