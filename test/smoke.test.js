@@ -1710,6 +1710,27 @@ async function main() {
       const recs = await api(`/api/revenue/recommendations?propertyId=${propertyId}&days=30`);
       const high = recs.data.filter(r => r.date === ci && r.changePct > 0);
       assert.ok(high.length >= 1, 'con alta ocupación debe recomendar subir la tarifa');
+      assert.ok(high.some(r => r.pace === 'ahead'), 'la recomendación se basa en el ritmo adelantado (pace)');
+    });
+
+    await test('el clasificador de ritmo (pace) distingue adelantado, rezagado y en ritmo', async () => {
+      const { paceFor } = await import('../src/services/revenue.js');
+      // Ocupación alta muy anticipada → adelantado.
+      assert.equal(paceFor({ occupancy: 0.6, leadDays: 25 }).pace, 'ahead');
+      // Ocupación casi nula a pocos días → rezagado.
+      assert.equal(paceFor({ occupancy: 0.1, leadDays: 3 }).pace, 'behind');
+      // Ocupación acorde a la curva → en ritmo.
+      const mid = paceFor({ occupancy: 0.35, leadDays: 14 });
+      assert.equal(mid.pace, 'on_pace');
+      // Un evento en la fecha eleva la expectativa (empuja a subir).
+      assert.equal(paceFor({ occupancy: 0.55, leadDays: 10, hasEvent: true }).pace, 'ahead');
+    });
+
+    await test('el análisis de pace expone la curva esperada por fecha', async () => {
+      const { status, data } = await api(`/api/revenue/pacing?propertyId=${propertyId}&days=14`);
+      assert.equal(status, 200);
+      assert.equal(data.length, 14);
+      assert.ok('expectedPct' in data[0] && 'paceRatio' in data[0] && 'leadDays' in data[0] && ['ahead', 'behind', 'on_pace'].includes(data[0].pace));
     });
 
     await test('crear regla de precio y aplicar un cambio de tarifa', async () => {

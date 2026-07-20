@@ -2249,11 +2249,12 @@
 
   async function viewRevenue() {
     const [fc, recs, rules, types] = await Promise.all([
-      get(`/revenue/forecast?${pid()}&days=14`),
+      get(`/revenue/pacing?${pid()}&days=14`),
       get(`/revenue/recommendations?${pid()}&days=14`),
       get(`/revenue/rules?${pid()}`),
       get(`/admin/room-types?${pid()}`).catch(() => []),
     ]);
+    const pacePill = p => p === 'ahead' ? badge('adelantado ↑', 'green') : p === 'behind' ? badge('rezagado ↓', 'red') : badge('en ritmo', 'gray');
     window._applyRate = async (ratePlanId, price) => {
       try { await api('/revenue/apply', { method: 'POST', body: { propertyId: state.propertyId, ratePlanId, newPrice: price } }); toast('Tarifa actualizada'); render(); }
       catch (e) { toast(e.message, true); }
@@ -2272,12 +2273,12 @@
             <div style="width:70%;background:linear-gradient(180deg,var(--accent),var(--accent-lo));border-radius:3px 3px 0 0;height:${Math.max(3, Math.round(d.revpar / maxRev * 100))}%"></div>
             <div style="font-size:9px;color:var(--muted)">${d.date.slice(8)}</div></div>`).join('')}
         </div>
-        <table class="mt"><tr><th>Fecha</th><th>Ocupación</th><th>Vendidas</th><th>ADR</th><th>RevPAR</th></tr>
-        ${fc.map(d => `<tr><td>${d.date}</td><td>${d.occupancyPct >= 80 ? badge(d.occupancyPct + '%', 'green') : d.occupancyPct <= 40 ? badge(d.occupancyPct + '%', 'yellow') : d.occupancyPct + '%'}</td><td>${d.roomsSold}/${d.sellable}</td><td>${cop(d.adr)}</td><td>${cop(d.revpar)}</td></tr>`).join('')}</table>
+        <table class="mt"><tr><th>Fecha</th><th>Ocupación</th><th>Esperado (pace)</th><th>Ritmo</th><th>Vendidas</th><th>ADR</th><th>RevPAR</th></tr>
+        ${fc.map(d => `<tr><td>${d.date}${d.hasEvent ? ' 🎉' : d.weekend ? ' ·fds' : ''}</td><td>${d.occupancyPct >= 80 ? badge(d.occupancyPct + '%', 'green') : d.occupancyPct <= 40 ? badge(d.occupancyPct + '%', 'yellow') : d.occupancyPct + '%'}</td><td class="muted">${d.expectedPct}%</td><td>${pacePill(d.pace)}</td><td>${d.roomsSold}/${d.sellable}</td><td>${cop(d.adr)}</td><td>${cop(d.revpar)}</td></tr>`).join('')}</table>
       </div>
       <div class="card"><h3>Recomendaciones de tarifa (${recs.length})</h3>
-        ${recs.length ? `<table><tr><th>Fecha</th><th>Habitación</th><th>Ocup.</th><th>Actual</th><th>Sugerida</th><th>Motivo</th><th></th></tr>
-        ${recs.slice(0, 25).map(r => `<tr><td>${r.date}</td><td>${esc(r.roomType)}</td><td>${r.occupancyPct}%</td><td>${cop(r.currentPrice)}</td>
+        ${recs.length ? `<table><tr><th>Fecha</th><th>Habitación</th><th>Ritmo</th><th>Actual</th><th>Sugerida</th><th>Motivo</th><th></th></tr>
+        ${recs.slice(0, 25).map(r => `<tr><td>${r.date}</td><td>${esc(r.roomType)}</td><td>${r.pace ? pacePill(r.pace) : r.occupancyPct + '%'}</td><td>${cop(r.currentPrice)}</td>
           <td>${r.changePct > 0 ? badge('▲ ' + cop(r.suggestedPrice), 'green') : badge('▼ ' + cop(r.suggestedPrice), 'yellow')}</td>
           <td class="muted" style="font-size:12px">${esc(r.reason)}</td>
           <td><button class="btn small" onclick="_applyRate('${r.ratePlanId}',${r.suggestedPrice})">Aplicar</button></td></tr>`).join('')}</table>`

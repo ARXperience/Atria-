@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
-import { forecast, recommendations, applyRateChange } from '../services/revenue.js';
+import { forecast, recommendations, applyRateChange, pacingAnalysis } from '../services/revenue.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
 
@@ -16,6 +16,12 @@ revenueRouter.get('/forecast', requirePermission('revenue.view'), async (req, re
 revenueRouter.get('/recommendations', requirePermission('revenue.view'), async (req, res) => {
   if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
   res.json(await recommendations(req.query.propertyId, Math.min(60, +req.query.days || 14)));
+});
+
+// Ritmo de reservas (pace) por fecha: base del pricing dinámico (§34)
+revenueRouter.get('/pacing', requirePermission('revenue.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await pacingAnalysis(req.query.propertyId, Math.min(60, +req.query.days || 30)));
 });
 
 revenueRouter.post('/apply', requirePermission('revenue.manage'), async (req, res) => {

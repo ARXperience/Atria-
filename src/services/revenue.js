@@ -37,23 +37,74 @@ export async function forecast(propertyId, days = 14) {
   return out;
 }
 
-// Recomendaciones por fecha y tipo de habitación según ocupación + reglas.
-export async function recommendations(propertyId, days = 14) {
-  const fc = await forecast(propertyId, days);
-  const roomTypes = await prisma.roomType.findMany({ where: { propertyId, active: true }, include: { ratePlans: { where: { active: true }, orderBy: { price: 'asc' }, take: 1 } } });
-  const rules = await prisma.pricingRule.findMany({ where: { propertyId, active: true } });
+// Curva de pickup (booking curve): fracción de la demanda final que suele estar
+// reservada según los días que faltan para la llegada. Heurística estándar del
+// sector; parametrizable a futuro con histórico real de pickup por temporada.
+function pickupCurve(leadDays) {
+  if (leadDays >= 45) return 0.18;
+  if (leadDays >= 30) return 0.28;
+  if (leadDays >= 21) return 0.40;
+  if (leadDays >= 14) return 0.52;
+  if (leadDays >= 7) return 0.68;
+  if (leadDays >= 3) return 0.82;
+  return 0.93;
+}
+const TARGET_FINAL_OCC = 0.72; // objetivo de ocupación final (parametrizable)
 
+// Clasifica el ritmo de una fecha comparando su ocupación on-the-books contra la
+// ocupación esperada por la curva de pickup (con premium de fin de semana/evento).
+export function paceFor({ occupancy, leadDays, weekend = false, hasEvent = false }) {
+  const expected = TARGET_FINAL_OCC * pickupCurve(leadDays) * (weekend ? 1.1 : 1) * (hasEvent ? 1.25 : 1);
+  const paceRatio = expected > 0 ? Math.round((occupancy / expected) * 100) / 100 : 1;
+  let pace = 'on_pace';
+  if (paceRatio >= 1.15 || (hasEvent && occupancy >= 0.5)) pace = 'ahead';
+  else if (paceRatio <= 0.6) pace = 'behind';
+  return { expectedPct: Math.round(expected * 100), paceRatio, pace };
+}
+
+// Análisis de ritmo de reservas (pace): compara la ocupación on-the-books contra
+// la curva de pickup esperada según anticipación, con premium de fin de semana y
+// demanda por eventos confirmados. Base del pricing dinámico (§34).
+export async function pacingAnalysis(propertyId, days = 30) {
+  const fc = await forecast(propertyId, days);
   const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  let eventDates = new Set();
+  try {
+    const events = await prisma.eventBooking.findMany({ where: { propertyId, status: { in: ['confirmed', 'in_progress'] }, date: { gte: start, lt: addDays(start, days) } }, select: { date: true } });
+    eventDates = new Set(events.map(e => dayStr(e.date)));
+  } catch { /* módulo opcional */ }
+
+  return fc.map((day) => {
+    const leadDays = Math.max(0, Math.round((new Date(day.date + 'T00:00:00Z').getTime() - start.getTime()) / 86400000));
+    const dow = new Date(day.date + 'T00:00:00Z').getUTCDay(); // 5=vie, 6=sáb
+    const weekend = dow === 5 || dow === 6;
+    const hasEvent = eventDates.has(day.date);
+    const { expectedPct, paceRatio, pace } = paceFor({ occupancy: day.occupancyPct / 100, leadDays, weekend, hasEvent });
+    return { ...day, leadDays, weekend, hasEvent, expectedPct, paceRatio, pace };
+  });
+}
+
+// Recomendaciones por fecha y tipo de habitación. Prioridad: reglas configuradas
+// → ritmo de reservas (pace) → ocupación. El pace ajusta la tarifa según si la
+// fecha va adelantada o rezagada respecto a su curva de pickup (§34).
+export async function recommendations(propertyId, days = 14) {
+  const [pacing, roomTypes, rules] = await Promise.all([
+    pacingAnalysis(propertyId, days),
+    prisma.roomType.findMany({ where: { propertyId, active: true }, include: { ratePlans: { where: { active: true }, orderBy: { price: 'asc' }, take: 1 } } }),
+    prisma.pricingRule.findMany({ where: { propertyId, active: true } }),
+  ]);
+
   const recs = [];
-  for (const day of fc) {
+  for (const day of pacing) {
     const occ = day.occupancyPct / 100;
-    const daysAhead = Math.round((new Date(day.date) - now) / 86400000);
+    const daysAhead = day.leadDays;
     for (const rt of roomTypes) {
       const plan = rt.ratePlans[0];
       if (!plan) continue;
       let adjust = 0, reason = null;
 
-      // Reglas configuradas (tienen prioridad)
+      // 1) Reglas configuradas (tienen prioridad)
       const applicable = rules.filter(r => (!r.roomTypeId || r.roomTypeId === rt.id)
         && (r.occupancyGte == null || occ >= r.occupancyGte)
         && (r.occupancyLte == null || occ <= r.occupancyLte)
@@ -61,14 +112,21 @@ export async function recommendations(propertyId, days = 14) {
       if (applicable.length) {
         const r = applicable.sort((a, b) => Math.abs(b.adjustPct) - Math.abs(a.adjustPct))[0];
         adjust = r.adjustPct; reason = `Regla "${r.name}"`;
-      } else if (occ >= 0.8) { adjust = 0.15; reason = 'Alta demanda (ocupación ≥ 80%)'; }
-      else if (occ <= 0.4 && day.roomsSold >= 0) { adjust = -0.10; reason = 'Baja demanda (ocupación ≤ 40%)'; }
+      // 2) Pace: adelantado → subir; rezagado → estimular
+      } else if (day.pace === 'ahead') {
+        adjust = day.hasEvent ? 0.20 : (day.paceRatio >= 1.4 ? 0.18 : 0.12);
+        reason = `Ritmo adelantado (${day.occupancyPct}% vendido vs. ${day.expectedPct}% esperado a ${daysAhead}d${day.hasEvent ? ', evento en la fecha' : day.weekend ? ', fin de semana' : ''})`;
+      } else if (day.pace === 'behind') {
+        adjust = -0.12; reason = `Ritmo rezagado (${day.occupancyPct}% vendido vs. ${day.expectedPct}% esperado a ${daysAhead}d) — estimular demanda`;
+      // 3) Respaldo por ocupación absoluta
+      } else if (occ >= 0.85) { adjust = 0.10; reason = 'Ocupación muy alta (≥ 85%)'; }
 
       if (adjust !== 0) {
         recs.push({
           date: day.date, roomTypeId: rt.id, roomType: rt.name, ratePlanId: plan.id,
           currentPrice: plan.price, suggestedPrice: money(plan.price * (1 + adjust)),
-          changePct: Math.round(adjust * 100), occupancyPct: day.occupancyPct, reason,
+          changePct: Math.round(adjust * 100), occupancyPct: day.occupancyPct,
+          pace: day.pace, paceRatio: day.paceRatio, reason,
         });
       }
     }
