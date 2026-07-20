@@ -653,6 +653,8 @@
   async function viewInbox() {
     const convos = await get(`/inbox/conversations?${pid()}`);
     setTimeout(() => bindInbox(convos), 0);
+    const intentLabel = { queja: '⚠️ Queja', cancelacion: '✖️ Cancelación', pago: '💳 Pago', evento: '🎉 Evento', reserva: '📅 Reserva', info: 'ℹ️ Info', otro: '💬 Otro' };
+    const urgDot = u => u === 'high' ? '<span title="Urgente" style="color:var(--red)">●</span>' : u === 'medium' ? '<span title="Media" style="color:var(--yellow)">●</span>' : '';
     return `
       <div class="card" id="waCard"><h3>WhatsApp (Baileys)</h3><div id="waStatus" class="muted">Consultando estado…</div></div>
       <div class="inbox">
@@ -662,6 +664,7 @@
               <div class="name"><span>${c.channel === 'whatsapp' ? '🟢' : '💬'} ${esc(c.contactName || c.contactPhone || 'Visitante')}</span>
                 ${c.aiEnabled ? badge('IA', 'blue') : badge('Humano', 'yellow')}</div>
               <div class="preview">${esc(c.lastMessage || '')}</div>
+              <div style="font-size:10.5px;margin-top:3px;color:var(--muted)">${urgDot(c.urgency)} ${esc(intentLabel[c.intent] || '')}</div>
             </div>`).join('') : '<p class="muted" style="padding:16px">Sin conversaciones aún. Conecta WhatsApp o prueba el webchat en <code>/chat.html</code>.</p>'}
         </div>
         <div class="chat" id="chatPane">
@@ -713,6 +716,11 @@
   async function openConvo(id) {
     state.inbox.convoId = id;
     document.querySelectorAll('.convo-item').forEach(el => el.classList.toggle('active', el.dataset.id === id));
+    let insights = null;
+    try { insights = await get(`/inbox/conversations/${id}/insights`); } catch { /* opcional */ }
+    const intentLabel = { queja: '⚠️ Queja', cancelacion: '✖️ Cancelación', pago: '💳 Pago', evento: '🎉 Evento', reserva: '📅 Reserva', info: 'ℹ️ Info', otro: '💬 Otro' };
+    const urgBadge = u => u === 'high' ? badge('urgente', 'red') : u === 'medium' ? badge('media', 'yellow') : badge('baja', 'gray');
+    window._useSuggestion = () => { const t = $('#chatText'); if (t && insights) { t.value = insights.suggestedReply; t.focus(); } };
     const load = async () => {
       const { conversation: c, messages } = await get(`/inbox/conversations/${id}/messages`);
       const pane = $('#chatPane');
@@ -726,7 +734,10 @@
               : `${badge('Atiende: ' + (c.assignedTo || 'humano'), 'yellow')} <button class="btn small secondary" onclick="_takeover(true)">🤖 Devolver a la IA</button>`}
           </div>
         </div>
-        ${c.summary ? `<div style="padding:10px 16px;background:var(--accent-soft);border-bottom:1px solid var(--border-soft);font-size:12.5px;color:var(--text-dim)"><b style="color:var(--accent-hi)">🧠 Resumen IA:</b> ${esc(c.summary)}</div>` : ''}
+        ${insights ? `<div style="padding:9px 16px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:12px">
+          <div style="margin-bottom:5px">${intentLabel[insights.intent] || insights.intent} · ${urgBadge(insights.urgency)}${insights.summary ? ` · <span class="muted">${esc(insights.summary.slice(0, 120))}</span>` : ''}</div>
+          <div style="display:flex;gap:8px;align-items:flex-start"><span style="color:var(--accent2)">✨ Sugerencia:</span><span style="flex:1;color:var(--text-dim)">${esc(insights.suggestedReply)}</span><button class="btn small ghost" onclick="_useSuggestion()">Usar</button></div>
+        </div>` : (c.summary ? `<div style="padding:10px 16px;background:var(--accent-soft);border-bottom:1px solid var(--border-soft);font-size:12.5px;color:var(--text-dim)"><b style="color:var(--accent-hi)">🧠 Resumen IA:</b> ${esc(c.summary)}</div>` : '')}
         <div class="chat-body" id="chatBody">
           ${messages.map(m => `<div class="msg ${m.direction}">${esc(m.body)}<div class="meta">${m.direction === 'out' ? esc(m.sender === 'ai' ? 'Atria IA' : m.sender) + ' · ' : ''}${dt(m.createdAt)}</div></div>`).join('')}
         </div>

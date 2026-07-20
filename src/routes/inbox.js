@@ -16,13 +16,27 @@ inboxRouter.get('/conversations', requirePermission('inbox.view'), async (req, r
     where: { propertyId },
     orderBy: { lastMessageAt: 'desc' },
     take: 100,
-    include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 } },
+    include: { messages: { orderBy: { createdAt: 'desc' }, take: 6 } },
   });
-  res.json(conversations.map(c => ({
-    id: c.id, channel: c.channel, contactName: c.contactName, contactPhone: c.contactPhone,
-    status: c.status, aiEnabled: c.aiEnabled, assignedTo: c.assignedTo,
-    lastMessageAt: c.lastMessageAt, lastMessage: c.messages[0]?.body?.slice(0, 120) || null,
-  })));
+  const { quickClassify } = await import('../services/ai/inboxIntel.js');
+  res.json(conversations.map(c => {
+    const lastInbound = c.messages.find(m => m.direction === 'in');
+    const { intent, urgency } = quickClassify(lastInbound?.body);
+    return {
+      id: c.id, channel: c.channel, contactName: c.contactName, contactPhone: c.contactPhone,
+      status: c.status, aiEnabled: c.aiEnabled, assignedTo: c.assignedTo,
+      lastMessageAt: c.lastMessageAt, lastMessage: c.messages[0]?.body?.slice(0, 120) || null,
+      intent, urgency,
+    };
+  }));
+});
+
+// Insights de IA para una conversación: intención, urgencia, resumen y respuesta sugerida
+inboxRouter.get('/conversations/:id/insights', requirePermission('inbox.view'), async (req, res) => {
+  const convo = await prisma.conversation.findUnique({ where: { id: req.params.id } });
+  if (!convo || !propertyScope(req, convo.propertyId)) return res.status(404).json({ error: 'Conversación no encontrada' });
+  const { conversationInsights } = await import('../services/ai/inboxIntel.js');
+  res.json(await conversationInsights(convo.id));
 });
 
 inboxRouter.get('/conversations/:id/messages', requirePermission('inbox.view'), async (req, res) => {

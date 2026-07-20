@@ -600,6 +600,33 @@ async function main() {
       assert.equal(convo.aiEnabled, false, 'la IA debe quedar en pausa');
     });
 
+    // ===== Inteligencia del inbox: clasificación, resumen y respuesta sugerida (§13/§41) =====
+    await test('el clasificador de intención distingue queja, reserva e info', async () => {
+      const { classifyIntent } = await import('../src/services/ai/inboxIntel.js');
+      assert.deepEqual(classifyIntent('esto es un reclamo, pésimo servicio'), { intent: 'queja', urgency: 'high' });
+      assert.equal(classifyIntent('quiero reservar una habitación para 2 noches').intent, 'reserva');
+      assert.equal(classifyIntent('¿tienen parqueadero y wifi?').intent, 'info');
+      assert.equal(classifyIntent('quiero cancelar mi reserva').urgency, 'high');
+    });
+
+    await test('la lista del inbox clasifica cada conversación por intención', async () => {
+      const { data } = await api(`/api/inbox/conversations?propertyId=${propertyId}`);
+      const convo = data.find(c => c.channel === 'webchat');
+      assert.ok('intent' in convo && 'urgency' in convo, 'cada conversación trae intención y urgencia');
+      assert.equal(convo.intent, 'queja', 'la conversación de queja se clasifica como queja');
+    });
+
+    await test('los insights de la conversación traen resumen y respuesta sugerida', async () => {
+      const { data: list } = await api(`/api/inbox/conversations?propertyId=${propertyId}`);
+      const convo = list.find(c => c.channel === 'webchat');
+      const { status, data } = await api(`/api/inbox/conversations/${convo.id}/insights`);
+      assert.equal(status, 200);
+      assert.equal(data.intent, 'queja');
+      assert.equal(data.urgency, 'high');
+      assert.ok(data.summary && data.summary.length > 0, 'incluye el resumen de la conversación');
+      assert.ok(/lamentamos|equipo|revis/i.test(data.suggestedReply), 'sugiere una respuesta empática de queja');
+    });
+
     // ===== Huésped extranjero → SIRE =====
     await test('huésped extranjero genera checklist SIRE', async () => {
       const ci = futureDay(30), co = futureDay(32);
