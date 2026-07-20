@@ -1377,6 +1377,56 @@ async function main() {
       assert.ok(data.distribution[5] >= 1 && data.distribution[2] >= 1);
     });
 
+    // ===== Eventos & corporativo (§33) =====
+    let venueId, eventId;
+    await test('los salones demo están sembrados', async () => {
+      const { status, data } = await api(`/api/events/venues?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(data.length >= 2);
+      venueId = data.reduce((a, b) => (b.capacity > a.capacity ? b : a)).id; // el salón más grande
+    });
+
+    await test('cotización de evento suma salón + catering + IVA', async () => {
+      const q = await api('/api/events/quote', { method: 'POST', body: { venueId, durationType: 'full', attendees: 50, cateringPerPerson: 40000, extras: 100000 } });
+      assert.equal(q.status, 200);
+      assert.equal(q.data.cateringTotal, 50 * 40000);
+      assert.equal(q.data.subtotal, q.data.venueFee + q.data.cateringTotal + q.data.extras);
+      assert.equal(q.data.total, q.data.subtotal + q.data.taxes);
+      assert.equal(q.data.deposit, Math.round(q.data.total * 0.5));
+    });
+
+    await test('crear evento como cotización', async () => {
+      const ev = await api('/api/events', { method: 'POST', body: { propertyId, venueId, clientName: 'ACME Corp', clientContact: 'eventos@acme.co', eventType: 'corporativo', date: futureDay(30), attendees: 50, setup: 'escuela', durationType: 'full', cateringPerPerson: 40000 } });
+      assert.equal(ev.status, 201);
+      eventId = ev.data.id;
+      assert.equal(ev.data.status, 'quote');
+      assert.ok(ev.data.total > 0 && /^EVT-/.test(ev.data.code));
+    });
+
+    await test('excede la capacidad del salón se rechaza', async () => {
+      const small = (await api(`/api/events/venues?propertyId=${propertyId}`)).data.find(v => v.capacity < 100) || {};
+      const ev = await api('/api/events', { method: 'POST', body: { propertyId, venueId: small.id, clientName: 'X', date: futureDay(31), attendees: 999, durationType: 'full' } });
+      assert.equal(ev.status, 400);
+    });
+
+    await test('confirmar evento y bloquear doble reserva del salón', async () => {
+      const c = await api(`/api/events/${eventId}/confirm`, { method: 'POST' });
+      assert.equal(c.status, 200);
+      assert.equal(c.data.status, 'confirmed');
+      // Otro evento el mismo día en el mismo salón
+      const other = await api('/api/events', { method: 'POST', body: { propertyId, venueId, clientName: 'Otro', date: futureDay(30), attendees: 10, durationType: 'full' } });
+      const clash = await api(`/api/events/${other.data.id}/confirm`, { method: 'POST' });
+      assert.equal(clash.status, 400, 'el salón ya está ocupado esa fecha');
+    });
+
+    await test('overview de eventos reporta pipeline y confirmados', async () => {
+      const { status, data } = await api(`/api/events/overview?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(data.venues >= 2);
+      assert.ok(data.confirmed >= 1);
+      assert.ok(data.pipeline >= 0);
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

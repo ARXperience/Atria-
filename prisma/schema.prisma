@@ -1283,3 +1283,58 @@ model Review {
   @@index([propertyId, status])
   @@index([propertyId, source])
 }
+
+// ===== Eventos & corporativo (§33) — salones y montajes =====
+model Venue {
+  id           String   @id @default(cuid())
+  propertyId   String
+  name         String
+  capacity     Int      @default(0)
+  halfDayRate  Float    @default(0)
+  fullDayRate  Float    @default(0)
+  hourlyRate   Float    @default(0)
+  amenities    String?  // texto libre: proyector, sonido, catering…
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  events       EventBooking[]
+
+  @@index([propertyId, active])
+}
+
+model EventBooking {
+  id              String   @id @default(cuid())
+  code            String   @unique // EVT-2026-000123
+  propertyId      String
+  venueId         String
+  venue           Venue    @relation(fields: [venueId], references: [id])
+  leadId          String?
+  clientName      String
+  clientContact   String?
+  eventType       String   @default("corporativo") // corporativo | social | boda | capacitacion
+  date            DateTime
+  startTime       String   @default("08:00")
+  endTime         String   @default("17:00")
+  attendees       Int      @default(0)
+  setup           String   @default("auditorio") // auditorio | escuela | banquete | coctel | u
+  durationType    String   @default("full") // full | half | hourly
+  hours           Int      @default(0)
+  venueFee        Float    @default(0)
+  cateringPerPerson Float  @default(0)
+  cateringTotal   Float    @default(0)
+  extras          Float    @default(0)
+  extrasNote      String?
+  subtotal        Float    @default(0)
+  taxes           Float    @default(0)
+  total           Float    @default(0)
+  deposit         Float    @default(0)
+  status          String   @default("quote") // quote | confirmed | in_progress | completed | cancelled
+  notes           String?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([propertyId, status])
+  @@index([propertyId, date])
+}

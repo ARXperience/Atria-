@@ -125,6 +125,14 @@ async function main() {
     });
   }
 
+  // Salones para eventos (§33)
+  for (const [name, capacity, half, full, hourly, amenities] of [
+    ['Salón Bolívar', 120, 900000, 1600000, 250000, 'Proyector 4K, sonido, tarima, WiFi dedicado'],
+    ['Sala Chapinero', 40, 400000, 700000, 120000, 'Pantalla, videoconferencia, pizarra'],
+  ]) {
+    await prisma.venue.create({ data: { propertyId: property.id, name, capacity, halfDayRate: half, fullDayRate: full, hourlyRate: hourly, amenities } });
+  }
+
   // Segunda sede (§8 multi-sede): permite consolidar el portafolio.
   const property2 = await prisma.property.create({
     data: {

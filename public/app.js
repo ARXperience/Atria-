@@ -166,6 +166,7 @@
     ['crm', '👥 CRM'],
     ['marketing', '📣 Marketing'],
     ['reputation', '⭐ Reputación'],
+    ['events', '🎉 Eventos & salones'],
     ['payments', '💳 Pagos'],
     ['invoices', '🧾 Facturación'],
     ['sep', 'IA & Contenido'],
@@ -1417,6 +1418,93 @@
       </div>`;
   }
 
+  async function viewEvents() {
+    const [ov, venues, events] = await Promise.all([
+      get(`/events/overview?${pid()}`),
+      get(`/events/venues?${pid()}`),
+      get(`/events?${pid()}`),
+    ]);
+    const evLabel = { corporativo: 'Corporativo', social: 'Social', boda: 'Boda', capacitacion: 'Capacitación' };
+    const stLabel = { quote: 'Cotización', confirmed: 'Confirmado', in_progress: 'En curso', completed: 'Completado', cancelled: 'Cancelado' };
+    const stBadge = { quote: 'pending', confirmed: 'confirmed', in_progress: 'in_progress', completed: 'done', cancelled: 'cancelled' };
+    window._evQuote = async () => {
+      try {
+        const q = await api('/events/quote', { method: 'POST', body: { venueId: $('#evVenue').value, durationType: $('#evDur').value, hours: +$('#evHours').value || 0, attendees: +$('#evAtt').value || 0, cateringPerPerson: +$('#evCater').value || 0, extras: +$('#evExtras').value || 0 } });
+        $('#evQuoteBox').innerHTML = `Salón ${cop(q.venueFee)} + Catering ${cop(q.cateringTotal)} + Extras ${cop(q.extras)} → Subtotal ${cop(q.subtotal)} · IVA ${cop(q.taxes)} · <b>Total ${cop(q.total)}</b> (anticipo ${cop(q.deposit)})`;
+      } catch (e) { toast(e.message, true); }
+    };
+    window._evCreate = async () => {
+      try {
+        await api('/events', { method: 'POST', body: { propertyId: state.propertyId, venueId: $('#evVenue').value, clientName: $('#evClient').value, clientContact: $('#evContact').value || null, eventType: $('#evType').value, date: $('#evDate').value, startTime: $('#evStart').value || '08:00', endTime: $('#evEnd').value || '17:00', attendees: +$('#evAtt').value || 0, setup: $('#evSetup').value, durationType: $('#evDur').value, hours: +$('#evHours').value || 0, cateringPerPerson: +$('#evCater').value || 0, extras: +$('#evExtras').value || 0 } });
+        toast('Evento cotizado'); render();
+      } catch (e) { toast(e.message, true); }
+    };
+    window._evConfirm = async id => { try { await api(`/events/${id}/confirm`, { method: 'POST' }); toast('Evento confirmado'); render(); } catch (e) { toast(e.message, true); } };
+    window._evStatus = async (id, status) => { try { await api(`/events/${id}/status`, { method: 'POST', body: { status } }); toast('Estado actualizado'); render(); } catch (e) { toast(e.message, true); } };
+    window._evVenue = async () => { try { await api('/events/venues', { method: 'POST', body: { propertyId: state.propertyId, name: $('#vnName').value, capacity: +$('#vnCap').value || 0, halfDayRate: +$('#vnHalf').value || 0, fullDayRate: +$('#vnFull').value || 0, hourlyRate: +$('#vnHour').value || 0, amenities: $('#vnAmen').value || null } }); toast('Salón creado'); render(); } catch (e) { toast(e.message, true); } };
+    setTimeout(animateCounts, 0);
+    const venueOpts = venues.map(v => `<option value="${v.id}">${esc(v.name)} (${v.capacity} pax)</option>`).join('');
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Salones</div><div class="value">${ov.venues}</div></div>
+        <div class="kpi"><div class="label">Próximos eventos</div><div class="value"><span data-count="${ov.upcomingCount}">0</span></div></div>
+        <div class="kpi"><div class="label">Pipeline (cotizaciones)</div><div class="value" style="color:var(--yellow)"><span data-count="${ov.pipeline}" data-fmt="cop">$0</span></div></div>
+        <div class="kpi"><div class="label">Ingresos eventos (mes)</div><div class="value" style="color:var(--green)"><span data-count="${ov.monthRevenue}" data-fmt="cop">$0</span></div></div>
+      </div>
+
+      ${venues.length ? `<div class="card mt"><h3>Cotizar evento</h3>
+        <div class="row">
+          <div><label>Cliente</label><input id="evClient"></div>
+          <div><label>Contacto</label><input id="evContact" placeholder="tel / correo"></div>
+          <div><label>Salón</label><select id="evVenue" onchange="_evQuote()">${venueOpts}</select></div>
+          <div><label>Tipo</label><select id="evType"><option value="corporativo">Corporativo</option><option value="social">Social</option><option value="boda">Boda</option><option value="capacitacion">Capacitación</option></select></div>
+          <div><label>Fecha</label><input id="evDate" type="date"></div>
+        </div>
+        <div class="row mt">
+          <div><label>Montaje</label><select id="evSetup"><option value="auditorio">Auditorio</option><option value="escuela">Escuela</option><option value="banquete">Banquete</option><option value="coctel">Cóctel</option><option value="u">Mesa en U</option></select></div>
+          <div><label>Duración</label><select id="evDur" onchange="_evQuote()"><option value="full">Día completo</option><option value="half">Medio día</option><option value="hourly">Por horas</option></select></div>
+          <div><label>Horas</label><input id="evHours" type="number" value="0" onchange="_evQuote()"></div>
+          <div><label>Asistentes</label><input id="evAtt" type="number" value="0" onchange="_evQuote()"></div>
+          <div><label>Inicio</label><input id="evStart" type="time" value="08:00"></div>
+          <div><label>Fin</label><input id="evEnd" type="time" value="17:00"></div>
+        </div>
+        <div class="row mt">
+          <div><label>Catering / persona</label><input id="evCater" type="number" value="0" onchange="_evQuote()"></div>
+          <div><label>Extras</label><input id="evExtras" type="number" value="0" onchange="_evQuote()"></div>
+          <button class="btn ghost fit" onclick="_evQuote()">Cotizar</button>
+          <button class="btn fit" onclick="_evCreate()">Crear cotización</button>
+        </div>
+        <p class="muted mt" id="evQuoteBox" style="font-size:13px">Selecciona salón y parámetros para ver la propuesta económica.</p>
+      </div>` : '<div class="card mt"><p class="muted">Crea un salón para empezar a cotizar eventos.</p></div>'}
+
+      <div class="card mt"><h3>Eventos</h3>
+        ${events.length ? `<table><tr><th>Código</th><th>Cliente</th><th>Salón</th><th>Fecha</th><th>Pax</th><th>Total</th><th>Estado</th><th></th></tr>
+        ${events.map(e => `<tr><td><b>${esc(e.code)}</b><div class="muted" style="font-size:11.5px">${evLabel[e.eventType] || esc(e.eventType)}</div></td>
+          <td>${esc(e.clientName)}</td><td>${esc(e.venue?.name || '—')}</td><td>${day(e.date)}</td><td>${e.attendees}</td>
+          <td><b>${cop(e.total)}</b></td>
+          <td>${sb(stBadge[e.status] || 'pending')} ${stLabel[e.status] || esc(e.status)}</td>
+          <td>${e.status === 'quote' ? `<button class="btn small" onclick="_evConfirm('${e.id}')">Confirmar</button>` : ''}
+              ${e.status === 'confirmed' ? `<button class="btn small ghost" onclick="_evStatus('${e.id}','in_progress')">Iniciar</button>` : ''}
+              ${e.status === 'in_progress' ? `<button class="btn small" onclick="_evStatus('${e.id}','completed')">Completar</button>` : ''}
+              ${['quote', 'confirmed'].includes(e.status) ? `<button class="btn small ghost" onclick="_evStatus('${e.id}','cancelled')">Cancelar</button>` : ''}</td>
+        </tr>`).join('')}</table>` : '<p class="muted">Aún no hay eventos. Crea la primera cotización arriba.</p>'}
+      </div>
+
+      <div class="card mt"><h3>Salones (${venues.length})</h3>
+        <table><tr><th>Salón</th><th>Capacidad</th><th>Medio día</th><th>Día completo</th><th>Hora</th><th>Amenidades</th></tr>
+        ${venues.map(v => `<tr><td><b>${esc(v.name)}</b></td><td>${v.capacity} pax</td><td>${cop(v.halfDayRate)}</td><td>${cop(v.fullDayRate)}</td><td>${cop(v.hourlyRate)}</td><td class="muted" style="font-size:12px">${esc(v.amenities || '—')}</td></tr>`).join('')}</table>
+        <div class="row mt">
+          <div><label>Nuevo salón</label><input id="vnName" placeholder="Nombre"></div>
+          <div><label>Capacidad</label><input id="vnCap" type="number"></div>
+          <div><label>Medio día</label><input id="vnHalf" type="number"></div>
+          <div><label>Día completo</label><input id="vnFull" type="number"></div>
+          <div><label>Hora</label><input id="vnHour" type="number"></div>
+          <div><label>Amenidades</label><input id="vnAmen"></div>
+          <button class="btn ghost fit" onclick="_evVenue()">Agregar</button>
+        </div>
+      </div>`;
+  }
+
   async function viewChannels() {
     const [ov, channels, catalog, mappings, logs, types] = await Promise.all([
       get(`/channels/overview?${pid()}`),
@@ -2145,6 +2233,7 @@
     crm: ['CRM — Leads', viewCrm],
     marketing: ['Marketing & campañas', viewMarketing],
     reputation: ['Reputación & reseñas', viewReputation],
+    events: ['Eventos, salones y montajes', viewEvents],
     housekeeping: ['Housekeeping', viewHousekeeping],
     maintenance: ['Mantenimiento', viewMaintenance],
     payments: ['Pagos y links', viewPayments],
