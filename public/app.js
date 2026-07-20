@@ -194,6 +194,7 @@
     ['fontur', '🏝️ FONTUR parafiscal'],
     ['documents', '📁 Documentos'],
     ['audit', '🔍 Auditoría'],
+    ['integrations', '🔌 Integraciones'],
     ['settings', '⚙️ Configuración'],
   ];
 
@@ -2129,6 +2130,60 @@
     </table></div>`;
   }
 
+  async function viewIntegrations() {
+    const ov = await get(`/integrations/overview?${pid()}`);
+    const catLabel = { payments: '💳 Pagos', invoicing: '🧾 Facturación', channel: '🌐 Canales/OTA', messaging: '💬 Mensajería', analytics: '📈 Analítica', other: '🔗 Otros' };
+    const stPill = s => s === 'connected' ? badge('Conectado', 'green') : s === 'error' ? badge('Error', 'red') : badge('Sin conectar', 'gray');
+    window._inTest = async provider => {
+      try { const r = await api(`/integrations/${provider}/test`, { method: 'POST', body: { propertyId: state.propertyId } }); toast(r.message, !r.ok); render(); }
+      catch (e) { toast(e.message, true); }
+    };
+    window._inToggle = async (id, enabled) => { try { await api(`/integrations/${id}`, { method: 'PATCH', body: { enabled } }); toast(enabled ? 'Habilitada' : 'Deshabilitada'); render(); } catch (e) { toast(e.message, true); } };
+    window._inConnect = provider => {
+      const it = ov.items.find(i => i.provider === provider);
+      const fields = it.fields || [];
+      modal(`<h3>Conectar ${esc(it.name)}</h3>
+        <p class="muted">Ingresa las credenciales del proveedor. Los secretos se almacenan cifrados y se enmascaran al mostrarse.</p>
+        ${fields.map(f => `<div class="mt"><label>${esc(f.label)}${f.secret ? ' 🔒' : ''}</label><input id="incfg_${f.key}" ${f.secret ? 'type="password"' : ''}></div>`).join('') || '<p class="muted">Esta integración no requiere credenciales adicionales.</p>'}
+        <div class="right mt"><button class="btn secondary" onclick="this.closest('.modal-bg').remove()">Cancelar</button>
+        <button class="btn" onclick="_inSave('${provider}')">Guardar y conectar</button></div>`);
+    };
+    window._inSave = async provider => {
+      const it = ov.items.find(i => i.provider === provider);
+      const config = {};
+      for (const f of it.fields || []) { const v = document.getElementById(`incfg_${f.key}`)?.value; if (v) config[f.key] = v; }
+      try { await api(`/integrations/${provider}/connect`, { method: 'POST', body: { propertyId: state.propertyId, config } }); toast('Integración conectada'); document.querySelector('.modal-bg')?.remove(); render(); }
+      catch (e) { toast(e.message, true); }
+    };
+    setTimeout(animateCounts, 0);
+    const cats = [...new Set(ov.items.map(i => i.category))];
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Integraciones</div><div class="value">${ov.total}</div></div>
+        <div class="kpi"><div class="label">Conectadas</div><div class="value" style="color:var(--green)"><span data-count="${ov.connected}">0</span></div></div>
+        <div class="kpi"><div class="label">Categorías</div><div class="value">${cats.length}</div></div>
+        <div class="kpi"><div class="label">Disponibles</div><div class="value">${ov.total - ov.connected}</div></div>
+      </div>
+      ${cats.map(cat => `<div class="card mt"><h3>${catLabel[cat] || esc(cat)}</h3>
+        <div class="grid cols-2">
+        ${ov.items.filter(i => i.category === cat).map(i => `
+          <div style="padding:14px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface-2)">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <b>${esc(i.name)}</b> ${stPill(i.status)}
+            </div>
+            ${Object.keys(i.config).length ? `<div class="muted mt" style="font-size:12px">${Object.entries(i.config).map(([k, v]) => `${esc(k)}: <code>${esc(String(v))}</code>`).join(' · ')}</div>` : ''}
+            ${i.managedByEnv ? `<div class="muted mt" style="font-size:12px">⚙️ Gestionada por variables de entorno del servidor.</div>`
+              : i.live ? `<div class="muted mt" style="font-size:12px">📡 Estado en vivo desde el servicio.</div>` : ''}
+            <div class="row mt" style="gap:8px">
+              ${!i.managedByEnv && !i.live ? `<button class="btn small" onclick="_inConnect('${i.provider}')">${i.status === 'connected' ? 'Reconfigurar' : 'Conectar'}</button>` : ''}
+              <button class="btn small ghost" onclick="_inTest('${i.provider}')">Probar</button>
+              ${i.id ? `<button class="btn small ghost" onclick="_inToggle('${i.id}', ${!i.enabled})">${i.enabled ? 'Deshabilitar' : 'Habilitar'}</button>` : ''}
+            </div>
+          </div>`).join('')}
+        </div></div>`).join('')}
+      <p class="muted mt" style="font-size:12px">Las pasarelas y Dataico se configuran con variables de entorno por seguridad; las demás se conectan aquí. Todo cambio queda en auditoría.</p>`;
+  }
+
   async function viewSettings() {
     const [users, params, props, gateways, templates, policies] = await Promise.all([
       get('/admin/users').catch(() => []),
@@ -2257,6 +2312,7 @@
     fontur: ['FONTUR — contribución parafiscal del turismo', viewFontur],
     documents: ['Centro documental', viewDocuments],
     audit: ['Auditoría y trazabilidad', viewAudit],
+    integrations: ['Centro de integraciones', viewIntegrations],
     settings: ['Configuración', viewSettings],
   };
 

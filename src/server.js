@@ -32,6 +32,7 @@ import { portfolioRouter } from './routes/portfolio.js';
 import { marketingRouter } from './routes/marketing.js';
 import { reputationRouter } from './routes/reputation.js';
 import { eventsRouter } from './routes/events.js';
+import { integrationsRouter } from './routes/integrations.js';
 import { miscRouter } from './routes/misc.js';
 import { publicRouter } from './routes/public.js';
 import { registerAutomations } from './services/automations.js';
@@ -87,6 +88,7 @@ app.use('/api/portfolio', authRequired, portfolioRouter);
 app.use('/api/marketing', authRequired, marketingRouter);
 app.use('/api/reputation', authRequired, reputationRouter);
 app.use('/api/events', authRequired, eventsRouter);
+app.use('/api/integrations', authRequired, integrationsRouter);
 app.use('/api', authRequired, miscRouter);
 
 // Frontend estático: panel admin + página de pago + portal huésped

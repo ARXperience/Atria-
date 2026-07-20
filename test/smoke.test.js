@@ -1427,6 +1427,41 @@ async function main() {
       assert.ok(data.pipeline >= 0);
     });
 
+    // ===== Centro de integraciones (§45) =====
+    await test('overview de integraciones lista el catálogo con estado en vivo', async () => {
+      const { status, data } = await api(`/api/integrations/overview?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(data.total >= 8);
+      const mock = data.items.find(i => i.provider === 'mercadopago');
+      assert.ok(mock && mock.managedByEnv, 'las pasarelas se gestionan por entorno');
+      const wa = data.items.find(i => i.provider === 'whatsapp');
+      assert.ok(wa && wa.live, 'WhatsApp reporta estado en vivo');
+    });
+
+    await test('no se puede configurar una integración gestionada por entorno', async () => {
+      const r = await api('/api/integrations/stripe/connect', { method: 'POST', body: { propertyId, config: { secretKey: 'sk_test' } } });
+      assert.equal(r.status, 400);
+    });
+
+    await test('conectar una OTA guarda credenciales y las enmascara', async () => {
+      const r = await api('/api/integrations/booking/connect', { method: 'POST', body: { propertyId, config: { hotelId: 'H-123', apiKey: 'secreto-super-largo-1234' } } });
+      assert.equal(r.status, 201);
+      assert.equal(r.data.status, 'connected');
+      assert.ok(String(r.data.config.apiKey).includes('••'), 'el secreto debe venir enmascarado');
+      assert.equal(r.data.config.hotelId, 'H-123');
+    });
+
+    await test('conectar sin datos requeridos se rechaza', async () => {
+      const r = await api('/api/integrations/ga4/connect', { method: 'POST', body: { propertyId, config: {} } });
+      assert.equal(r.status, 400);
+    });
+
+    await test('probar la integración conectada responde ok', async () => {
+      const r = await api('/api/integrations/booking/test', { method: 'POST', body: { propertyId } });
+      assert.equal(r.status, 200);
+      assert.equal(r.data.ok, true);
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

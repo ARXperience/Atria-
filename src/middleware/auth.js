@@ -13,7 +13,7 @@ const PERMISSIONS = {
     'dashboard.view', 'reservations.*', 'booking.*', 'rooms.*', 'guests.*', 'crm.*', 'inbox.*',
     'payments.*', 'housekeeping.*', 'maintenance.*', 'compliance.*', 'approvals.*', 'audit.view',
     'settings.view', 'whatsapp.*', 'notifications.*', 'users.view', 'users.manage', 'settings.edit',
-    'hr.*', 'payroll.view', 'payroll.manage', 'invoices.*', 'documents.*', 'content.*', 'sgsst.*', 'inventory.*', 'pos.*', 'revenue.*', 'channels.*', 'finance.*', 'dataprotection.*', 'fontur.*', 'marketing.*', 'reputation.*', 'events.*',
+    'hr.*', 'payroll.view', 'payroll.manage', 'invoices.*', 'documents.*', 'content.*', 'sgsst.*', 'inventory.*', 'pos.*', 'revenue.*', 'channels.*', 'finance.*', 'dataprotection.*', 'fontur.*', 'marketing.*', 'reputation.*', 'events.*', 'integrations.*',
   ],
   FRONTDESK: [
     'dashboard.view', 'reservations.*', 'booking.*', 'rooms.view', 'rooms.status', 'guests.*',
@@ -34,7 +34,7 @@ const PERMISSIONS = {
     'approvals.view', 'notifications.*', 'invoices.*', 'payroll.view', 'hr.view', 'documents.view', 'inventory.view', 'finance.*', 'fontur.*',
   ],
   HR: ['dashboard.view', 'notifications.*', 'audit.view', 'hr.*', 'payroll.*', 'documents.*', 'approvals.view', 'approvals.decide', 'sgsst.*', 'dataprotection.view', 'dataprotection.consent'],
-  AUDITOR: ['audit.view', 'dashboard.view', 'reservations.view', 'payments.view', 'compliance.view', 'approvals.view', 'invoices.view', 'payroll.view', 'hr.view', 'documents.view', 'sgsst.view', 'finance.view', 'dataprotection.view', 'fontur.view'],
+  AUDITOR: ['audit.view', 'dashboard.view', 'reservations.view', 'payments.view', 'compliance.view', 'approvals.view', 'invoices.view', 'payroll.view', 'hr.view', 'documents.view', 'sgsst.view', 'finance.view', 'dataprotection.view', 'fontur.view', 'integrations.view'],
 };
 
 export function hasPermission(role, perm) {

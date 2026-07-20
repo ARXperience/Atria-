@@ -1338,3 +1338,23 @@ model EventBooking {
   @@index([propertyId, status])
   @@index([propertyId, date])
 }
+
+// ===== Centro de integraciones (§45) — conectores externos =====
+model Integration {
+  id            String   @id @default(cuid())
+  propertyId    String
+  provider      String   // mercadopago | bold | stripe | wompi | dataico | booking | whatsapp | ga4 | webhook
+  category      String   // payments | invoicing | channel | messaging | analytics | other
+  name          String
+  status        String   @default("disconnected") // connected | disconnected | error
+  config        String?  // JSON con credenciales (secretos enmascarados al leer)
+  enabled       Boolean  @default(true)
+  lastCheckedAt DateTime?
+  lastError     String?
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([propertyId, provider])
+  @@index([propertyId, category])
+}
