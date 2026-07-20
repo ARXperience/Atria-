@@ -212,6 +212,32 @@ async function main() {
       assert.ok(tasks.some(t => t.type === 'checkout_clean'), 'debe crear tarea de limpieza automática');
     });
 
+    // ===== Encuestas post-estadía + quejas (§37) =====
+    await test('el check-out crea una encuesta post-estadía', async () => {
+      await settle(400);
+      const info = await (await fetch(`${BASE}/api/public/guest/reservation/${reservation.code}`)).json();
+      assert.ok(info.survey && info.survey.status === 'sent', 'la encuesta queda disponible');
+    });
+
+    await test('una encuesta con NPS bajo abre un caso interno (queja)', async () => {
+      const r = await fetch(`${BASE}/api/public/guest/reservation/${reservation.code}/survey`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nps: 3, ratingClean: 1, ratingService: 4, ratingComfort: 4, comment: 'La habitación no estaba limpia' }) });
+      assert.equal(r.status, 200);
+      const sv = await api(`/api/reputation/surveys?propertyId=${propertyId}`);
+      assert.equal(sv.status, 200);
+      assert.equal(sv.data.responded, 1);
+      assert.ok(sv.data.complaints.length >= 1, 'NPS bajo debe abrir una queja');
+      assert.equal(sv.data.complaints[0].category, 'limpieza');
+    });
+
+    await test('el equipo resuelve la queja con causa raíz y acción correctiva', async () => {
+      const sv = await api(`/api/reputation/surveys?propertyId=${propertyId}`);
+      const complaintId = sv.data.complaints[0].id;
+      const upd = await api(`/api/reputation/complaints/${complaintId}`, { method: 'PATCH', body: { status: 'resolved', rootCause: 'Falla en el turno de housekeeping', correctiveAction: 'Refuerzo de inspección de salida' } });
+      assert.equal(upd.status, 200);
+      assert.equal(upd.data.status, 'resolved');
+      assert.ok(upd.data.rootCause && upd.data.correctiveAction);
+    });
+
     // ===== Bot conversacional (mismo motor que WhatsApp, vía webchat) =====
     const sid = 'test-session-1';
     const chat = async text => {

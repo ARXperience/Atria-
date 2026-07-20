@@ -34,8 +34,11 @@ export function registerAutomations() {
       const { createInvoiceFromReservation } = await import('./invoicing.js');
       await createInvoiceFromReservation(reservationId, { actor: 'system' })
         .catch(err => logger.warn({ err: err.message }, 'auto invoice draft failed'));
+      // Encuesta post-estadía (§37): crea la encuesta para que el huésped la responda desde su portal.
+      const { ensureSurvey } = await import('./surveys.js');
+      await ensureSurvey(reservationId).catch(err => logger.warn({ err: err.message }, 'survey create failed'));
       await sendToGuest(propertyId, reservationId,
-        '¡Gracias por hospedarte con nosotros! 🌟 ¿Cómo calificarías tu estadía de 1 a 5? Tu opinión nos ayuda a mejorar.');
+        '¡Gracias por hospedarte con nosotros! 🌟 Cuéntanos cómo estuvo tu estadía en tu portal: te tomará 30 segundos.');
     } catch (err) { logger.error({ err }, 'automation checkout failed'); }
   });
 

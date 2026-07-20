@@ -1363,6 +1363,45 @@ model Review {
   @@index([propertyId, source])
 }
 
+// Encuestas post-estadía (§37): NPS + dimensiones; una por reserva.
+model Survey {
+  id            String   @id @default(cuid())
+  propertyId    String
+  reservationId String   @unique
+  guestName     String
+  status        String   @default("sent") // sent | responded
+  nps           Int?     // 0..10
+  ratingClean   Int?     // 1..5
+  ratingService Int?     // 1..5
+  ratingComfort Int?     // 1..5
+  comment       String?
+  sentAt        DateTime @default(now())
+  respondedAt   DateTime?
+
+  @@index([propertyId, status])
+}
+
+// Quejas / casos internos (§37): clasificación, causa raíz y acción correctiva.
+model Complaint {
+  id            String   @id @default(cuid())
+  propertyId    String
+  reservationId String?
+  surveyId      String?
+  guestName     String
+  category      String   @default("otro") // limpieza | servicio | ruido | facturacion | mantenimiento | otro
+  detail        String?
+  severity      String   @default("medium") // low | medium | high
+  status        String   @default("open") // open | in_progress | resolved
+  rootCause     String?
+  correctiveAction String?
+  source        String   @default("survey") // survey | review | manual
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([propertyId, status])
+}
+
 // ===== Eventos & corporativo (§33) — salones y montajes =====
 model Venue {
   id           String   @id @default(cuid())

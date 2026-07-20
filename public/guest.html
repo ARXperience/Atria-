@@ -72,12 +72,19 @@
           ${requests.length ? `<table class="mt">${requests.map(q => `<tr><td>${esc(reqLabel[q.type] || q.type)}</td><td class="muted" style="text-align:right;font-size:12px">${esc(stLabel[q.status] || q.status)}</td></tr>`).join('')}</table>` : ''}
         </div>` : ''}
 
-        ${r.status === 'checked_out' ? `<div class="card mt">
+        ${r.status === 'checked_out' && (!r.survey || r.survey.status !== 'responded') ? `<div class="card mt">
           <h3>⭐ ¿Cómo estuvo tu estadía?</h3>
-          <select id="rvRating"><option value="5">★★★★★ Excelente</option><option value="4">★★★★ Buena</option><option value="3">★★★ Regular</option><option value="2">★★ Mala</option><option value="1">★ Muy mala</option></select>
-          <textarea class="mt" id="rvComment" rows="3" placeholder="Cuéntanos (opcional)"></textarea>
-          <button class="btn mt" style="width:100%" onclick="sendReview()">Enviar reseña</button>
-        </div>` : ''}`;
+          <label>¿Qué tan probable es que nos recomiendes? (0–10)</label>
+          <select id="svNps">${Array.from({length:11},(_,i)=>`<option value="${i}">${i}</option>`).reverse().join('')}</select>
+          <div class="row mt" style="gap:8px">
+            <div><label>Limpieza</label><select id="svClean"><option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1</option></select></div>
+            <div><label>Servicio</label><select id="svService"><option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1</option></select></div>
+            <div><label>Confort</label><select id="svComfort"><option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1</option></select></div>
+          </div>
+          <textarea class="mt" id="svComment" rows="3" placeholder="Cuéntanos (opcional)"></textarea>
+          <button class="btn mt" style="width:100%" onclick="sendSurvey()">Enviar encuesta</button>
+        </div>` : r.survey && r.survey.status === 'responded' ? `<div class="card mt"><h3>🙏 ¡Gracias por tu opinión!</h3><p class="muted">Ya recibimos tu encuesta. Esperamos verte pronto.</p></div>` : ''}
+        <div id="reviewInvite"></div>`;
     }
 
     async function submitPre() {
@@ -99,8 +106,17 @@
       try { const d = await post('/express-checkout', {}); if (d.needsPayment) { toast('Tienes saldo pendiente, primero paga.', true); } else { toast('Check-out express solicitado. ¡Buen viaje!'); load(); } }
       catch (e) { toast(e.message, true); }
     }
+    async function sendSurvey() {
+      try {
+        const d = await post('/survey', { nps: +svNps.value, ratingClean: +svClean.value, ratingService: +svService.value, ratingComfort: +svComfort.value, comment: svComment.value });
+        toast('¡Gracias por tu opinión!');
+        if (d.invitePublicReview) {
+          document.getElementById('reviewInvite').innerHTML = `<div class="card mt"><h3>🌟 ¡Nos alegra que la hayas pasado bien!</h3><p class="muted">¿Nos ayudas con una reseña pública?</p><textarea id="rvComment" rows="2" placeholder="Tu reseña"></textarea><button class="btn mt" style="width:100%" onclick="sendReview()">Publicar reseña</button></div>`;
+        } else { load(); }
+      } catch (e) { toast(e.message, true); }
+    }
     async function sendReview() {
-      try { await post('/review', { rating: +rvRating.value, comment: rvComment.value }); toast('¡Gracias por tu reseña!'); }
+      try { await post('/review', { rating: 5, comment: (document.getElementById('rvComment')||{}).value || '' }); toast('¡Gracias por tu reseña!'); document.getElementById('reviewInvite').innerHTML=''; }
       catch (e) { toast(e.message, true); }
     }
     load();

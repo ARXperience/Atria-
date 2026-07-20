@@ -1511,7 +1511,15 @@
   }
 
   async function viewReputation() {
-    const ov = await get(`/reputation/overview?${pid()}`);
+    const [ov, sv] = await Promise.all([get(`/reputation/overview?${pid()}`), get(`/reputation/surveys?${pid()}`).catch(() => null)]);
+    const catLabel = { limpieza: 'Limpieza', servicio: 'Servicio', ruido: 'Ruido', facturacion: 'Facturación', mantenimiento: 'Mantenimiento', otro: 'Otro' };
+    const sevColor = { low: 'gray', medium: 'yellow', high: 'red' };
+    window._cxResolve = async id => {
+      const rc = prompt('Causa raíz:'); if (rc === null) return;
+      const ca = prompt('Acción correctiva:'); if (ca === null) return;
+      try { await api(`/reputation/complaints/${id}`, { method: 'PATCH', body: { status: 'resolved', rootCause: rc, correctiveAction: ca } }); toast('Queja resuelta'); render(); } catch (e) { toast(e.message, true); }
+    };
+    window._cxTake = async id => { try { await api(`/reputation/complaints/${id}`, { method: 'PATCH', body: { status: 'in_progress' } }); toast('En gestión'); render(); } catch (e) { toast(e.message, true); } };
     const srcLabel = { direct: 'Directo', google: 'Google', booking: 'Booking', tripadvisor: 'Tripadvisor', expedia: 'Expedia' };
     const stars = n => '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n);
     const senC = { positive: 'var(--green)', neutral: 'var(--yellow)', negative: 'var(--red)' };
@@ -1568,7 +1576,29 @@
           ${r.response ? `<div style="margin-top:8px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm);border-left:3px solid var(--accent)"><div class="muted" style="font-size:11.5px;margin-bottom:3px">Respuesta del hotel · ${esc(r.respondedBy || '')}</div>${esc(r.response)}</div>`
             : `<div class="mt"><button class="btn small ghost" onclick="_rvRespond('${r.id}')">✨ Responder (sugerencia IA)</button></div>`}
         </div>`).join('') : '<p class="muted">Aún no hay reseñas. Los huéspedes pueden dejarlas desde su portal al finalizar la estadía.</p>'}
-      </div>`;
+      </div>
+      ${sv ? `<div class="grid cols-4 mt">
+        <div class="kpi"><div class="label">NPS (encuestas)</div><div class="value" style="color:${sv.nps >= 0 ? 'var(--green)' : 'var(--red)'}">${sv.nps}</div></div>
+        <div class="kpi"><div class="label">Encuestas respondidas</div><div class="value">${sv.responded}<small>/${sv.sent}</small></div></div>
+        <div class="kpi"><div class="label">Tasa de respuesta</div><div class="value">${sv.responseRate}%</div></div>
+        <div class="kpi"><div class="label">Quejas abiertas</div><div class="value" style="color:${sv.openComplaints ? 'var(--red)' : 'inherit'}">${sv.openComplaints}</div></div>
+      </div>
+      <div class="grid cols-2 mt">
+        <div class="card"><h3>Encuestas post-estadía</h3>
+          <table><tr><td>Limpieza</td><td class="right"><b>${sv.dimensions.clean || '—'}</b>/5</td></tr>
+          <tr><td>Servicio</td><td class="right"><b>${sv.dimensions.service || '—'}</b>/5</td></tr>
+          <tr><td>Confort</td><td class="right"><b>${sv.dimensions.comfort || '—'}</b>/5</td></tr></table>
+          ${sv.recentSurveys.length ? `<div class="mt">${sv.recentSurveys.slice(0, 6).map(s => `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px"><b>NPS ${s.nps}</b> · ${esc(s.guestName)}${s.comment ? ` — <span class="muted">${esc(s.comment)}</span>` : ''}</div>`).join('')}</div>` : '<p class="muted mt" style="font-size:12px">Las encuestas se envían al hacer check-out.</p>'}
+        </div>
+        <div class="card"><h3>Quejas & casos (${sv.complaints.length})</h3>
+          ${sv.complaints.length ? `<table><tr><th>Huésped</th><th>Categoría</th><th>Sev.</th><th>Estado</th><th></th></tr>
+          ${sv.complaints.slice(0, 12).map(c => `<tr><td>${esc(c.guestName)}<div class="muted" style="font-size:11px">${esc(c.detail || '')}</div></td><td>${catLabel[c.category] || esc(c.category)}</td>
+            <td>${badge(c.severity, sevColor[c.severity] || 'gray')}</td>
+            <td>${c.status === 'resolved' ? sb('resolved') + ' resuelta' : c.status === 'in_progress' ? sb('in_progress') + ' en gestión' : sb('open') + ' abierta'}</td>
+            <td>${c.status === 'open' ? `<button class="btn small ghost" onclick="_cxTake('${c.id}')">Tomar</button>` : ''}${c.status !== 'resolved' ? `<button class="btn small" onclick="_cxResolve('${c.id}')">Resolver</button>` : (c.rootCause ? `<span class="muted" title="Causa: ${esc(c.rootCause)} · Acción: ${esc(c.correctiveAction || '')}">✔</span>` : '')}</td>
+          </tr>`).join('')}</table>` : '<p class="muted">Sin quejas registradas. Las encuestas con NPS bajo abren un caso automáticamente.</p>'}
+        </div>
+      </div>` : ''}`;
   }
 
   async function viewEvents() {

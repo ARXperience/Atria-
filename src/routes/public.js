@@ -7,6 +7,7 @@ import { upsertConversation, saveInbound, sendOutbound } from '../services/inbox
 import { assistantReply } from '../services/ai/assistant.js';
 import { createReview } from '../services/reputation.js';
 import { submitPrecheckin, createGuestRequest, listGuestRequests, payBalanceLink, requestExpressCheckout } from '../services/guestPortal.js';
+import { submitSurvey, getSurveyForReservation } from '../services/surveys.js';
 import { fmtCOP, dayStr, parseDay } from '../lib/util.js';
 import { logger } from '../lib/logger.js';
 
@@ -202,7 +203,16 @@ publicRouter.get('/guest/reservation/:code', async (req, res) => {
     pendingLink: r.paymentLinks.find(l => l.status === 'active')?.token || null,
     precheckinDone: !!r.precheckinAt, arrivalTime: r.arrivalTime,
     guestDoc: r.guest.documentNumber, guestEmail: r.guest.email, guestPhone: r.guest.phone, guestNationality: r.guest.nationality,
+    survey: r.status === 'checked_out' ? await getSurveyForReservation(r.id).then(s => s ? { status: s.status } : null).catch(() => null) : null,
   });
+});
+
+// Encuesta post-estadía (§37) respondida desde el portal
+publicRouter.post('/guest/reservation/:code/survey', async (req, res) => {
+  const r = await prisma.reservation.findUnique({ where: { code: req.params.code } });
+  if (!r) return res.status(404).json({ error: 'Reserva no encontrada' });
+  try { res.json(await submitSurvey(r.id, req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // Pre-check-in / check-in digital (§48.2)
