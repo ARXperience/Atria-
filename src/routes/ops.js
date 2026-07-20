@@ -4,6 +4,7 @@ import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
 import { requestApproval } from '../services/approvals.js';
 import { checklistFor, toggleChecklistItem, checklistComplete, registerLostItem, updateLostItem, listLostItems } from '../services/housekeeping.js';
+import { createAsset, updateAsset, listAssets, generatePreventiveOrders, onOrderResolved } from '../services/maintenance.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
 import { emitEvent } from '../lib/events.js';
@@ -116,11 +117,11 @@ opsRouter.get('/maintenance/orders', requirePermission('maintenance.view'), asyn
 });
 
 opsRouter.post('/maintenance/orders', requirePermission('maintenance.create'), async (req, res) => {
-  const { propertyId, roomId, title, description, priority = 'medium', blocksRoom = false } = req.body || {};
+  const { propertyId, roomId, assetId, title, description, priority = 'medium', blocksRoom = false } = req.body || {};
   if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
   if (!title) return badRequest(res, 'title requerido');
   const order = await prisma.maintenanceOrder.create({
-    data: { propertyId, roomId: roomId || null, title, description, priority, blocksRoom: false, reportedBy: req.user.name },
+    data: { propertyId, roomId: roomId || null, assetId: assetId || null, title, description, priority, blocksRoom: false, reportedBy: req.user.name },
   });
   await audit({ propertyId, user: req.user, action: 'maintenance.order_created', entity: 'MaintenanceOrder', entityId: order.id, after: req.body });
   emitEvent('maintenance.order_created', { propertyId, entityId: order.id });
@@ -160,6 +161,39 @@ opsRouter.patch('/maintenance/orders/:id', requirePermission('maintenance.edit')
       emitEvent('room.status_changed', { propertyId: order.propertyId, roomId: room.id, status: 'dirty' });
     }
   }
+  // Al resolver una orden ligada a un activo, actualiza su histórico y reprograma (§31)
+  if ((data.status === 'resolved' || data.status === 'closed') && order.assetId) {
+    await onOrderResolved(order);
+  }
   await audit({ propertyId: order.propertyId, user: req.user, action: 'maintenance.order_updated', entity: 'MaintenanceOrder', entityId: order.id, before: { status: order.status }, after: data });
   res.json(updated);
+});
+
+// ---- Activos y mantenimiento preventivo (§31) ----
+opsRouter.get('/assets', requirePermission('maintenance.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await listAssets(req.query.propertyId, { status: req.query.status, category: req.query.category }));
+});
+
+opsRouter.post('/assets', requirePermission('maintenance.create'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try {
+    res.status(201).json(await createAsset({ ...req.body, user: req.user }));
+  } catch (err) { badRequest(res, err.message); }
+});
+
+opsRouter.patch('/assets/:id', requirePermission('maintenance.edit'), async (req, res) => {
+  const asset = await prisma.asset.findUnique({ where: { id: req.params.id } });
+  if (!asset || !propertyScope(req, asset.propertyId)) return res.status(404).json({ error: 'Activo no encontrado' });
+  try {
+    res.json(await updateAsset(asset.id, { ...req.body, user: req.user }));
+  } catch (err) { badRequest(res, err.message); }
+});
+
+// Genera órdenes preventivas para los activos vencidos (o próximos a vencer).
+opsRouter.post('/maintenance/preventive/run', requirePermission('maintenance.create'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try {
+    res.json(await generatePreventiveOrders(req.body.propertyId, { withinDays: +req.body?.withinDays || 0, user: req.user }));
+  } catch (err) { badRequest(res, err.message); }
 });

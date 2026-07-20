@@ -1244,6 +1244,8 @@ model MaintenanceOrder {
   property   Property @relation(fields: [propertyId], references: [id])
   roomId     String?
   room       Room?    @relation(fields: [roomId], references: [id])
+  assetId    String?  // activo asociado (§31)
+  preventive Boolean  @default(false) // orden generada por plan preventivo
   title      String
   description String?
   priority   String   @default("medium") // low | medium | high | critical
@@ -1254,6 +1256,25 @@ model MaintenanceOrder {
   cost       Float?
   createdAt  DateTime @default(now())
   resolvedAt DateTime?
+
+  @@index([propertyId, status])
+}
+
+// Activos e infraestructura con mantenimiento preventivo (§31)
+model Asset {
+  id            String   @id @default(cuid())
+  propertyId    String
+  name          String
+  category      String   @default("other") // hvac | elevator | boiler | kitchen | pool | electrical | furniture | other
+  location      String?
+  serial        String?
+  brand         String?
+  status        String   @default("operational") // operational | needs_service | out_of_service | retired
+  intervalDays  Int?     // cadencia del plan preventivo
+  lastServiceAt DateTime?
+  nextServiceAt DateTime?
+  notes         String?
+  createdAt     DateTime @default(now())
 
   @@index([propertyId, status])
 }

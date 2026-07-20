@@ -793,8 +793,11 @@
   }
 
   async function viewMaintenance() {
-    const orders = await get(`/ops/maintenance/orders?${pid()}`);
-    const rooms = await get(`/admin/rooms?${pid()}`);
+    const [orders, rooms, assets] = await Promise.all([
+      get(`/ops/maintenance/orders?${pid()}`),
+      get(`/admin/rooms?${pid()}`),
+      get(`/ops/assets?${pid()}`),
+    ]);
     window._mtCreate = async () => {
       try {
         const { data } = await api('/ops/maintenance/orders', {
@@ -809,6 +812,18 @@
       try { await api(`/ops/maintenance/orders/${id}`, { method: 'PATCH', body: { status } }); toast('Orden actualizada'); render(); }
       catch (err) { toast(err.message, true); }
     };
+    window._asCreate = async () => {
+      try {
+        await api('/ops/assets', { method: 'POST', body: { propertyId: state.propertyId, name: $('#asName').value, category: $('#asCat').value, location: $('#asLoc').value, intervalDays: $('#asInt').value ? +$('#asInt').value : null } });
+        toast('Activo registrado'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._asPrev = async () => {
+      try { const { data } = await api('/ops/maintenance/preventive/run', { method: 'POST', body: { propertyId: state.propertyId } }); toast(`${data.generated} orden(es) preventiva(s) generada(s)`); render(); }
+      catch (err) { toast(err.message, true); }
+    };
+    const catLabel = { hvac: 'A/C', elevator: 'Ascensor', boiler: 'Caldera', kitchen: 'Cocina', pool: 'Piscina', electrical: 'Eléctrico', furniture: 'Mobiliario', other: 'Otro' };
+    const dueCount = assets.filter(a => a.due).length;
     return `
       <div class="card"><h3>Nueva orden</h3><div class="row">
         <div><label>Título *</label><input id="mtTitle" placeholder="Aire acondicionado no enfría"></div>
@@ -820,11 +835,28 @@
       <div class="card"><table>
         <tr><th>Título</th><th>Hab</th><th>Prioridad</th><th>Estado</th><th>Reportó</th><th></th></tr>
         ${orders.map(o => `<tr>
-          <td>${esc(o.title)}</td><td>${esc(o.room?.number || '—')}</td><td>${esc(o.priority)}</td><td>${sb(o.status)}</td><td>${esc(o.reportedBy || '')}</td>
+          <td>${o.preventive ? '🛠️ ' : ''}${esc(o.title)}</td><td>${esc(o.room?.number || '—')}</td><td>${esc(o.priority)}</td><td>${sb(o.status)}</td><td>${esc(o.reportedBy || '')}</td>
           <td>${o.status === 'open' ? `<button class="btn small secondary" onclick="_mtStatus('${o.id}','in_progress')">Iniciar</button>` : ''}
             ${o.status === 'in_progress' ? `<button class="btn small secondary" onclick="_mtStatus('${o.id}','resolved')">Resolver</button>` : ''}</td>
         </tr>`).join('')}
-      </table>${orders.length ? '' : '<p class="muted">Sin órdenes de mantenimiento.</p>'}</div>`;
+      </table>${orders.length ? '' : '<p class="muted">Sin órdenes de mantenimiento.</p>'}</div>
+
+      <div class="card mt"><div style="display:flex;justify-content:space-between;align-items:center">
+        <h3>🏭 Activos y plan preventivo</h3>
+        <button class="btn small ${dueCount ? '' : 'secondary'}" onclick="_asPrev()">Generar preventivas${dueCount ? ` (${dueCount} vencido/s)` : ''}</button>
+      </div>
+      <div class="row" style="align-items:flex-end;gap:10px">
+        <div style="flex:2"><label>Nombre *</label><input id="asName" placeholder="Ascensor principal"></div>
+        <div><label>Categoría</label><select id="asCat">${Object.entries(catLabel).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+        <div><label>Ubicación</label><input id="asLoc" placeholder="Torre A"></div>
+        <div><label>Cadencia (días)</label><input id="asInt" type="number" placeholder="90"></div>
+        <button class="btn fit" onclick="_asCreate()">Registrar</button>
+      </div>
+      ${assets.length ? `<table class="mt"><tr><th>Activo</th><th>Categoría</th><th>Ubicación</th><th>Estado</th><th>Próximo servicio</th></tr>
+        ${assets.map(a => `<tr><td><b>${esc(a.name)}</b></td><td>${catLabel[a.category] || esc(a.category)}</td><td class="muted">${esc(a.location || '—')}</td>
+          <td>${sb(a.status === 'operational' ? 'confirmed' : a.status === 'out_of_service' ? 'cancelled' : 'pending')} ${esc(a.status)}</td>
+          <td class="${a.due ? '' : 'muted'}" style="${a.due ? 'color:var(--red)' : ''}">${a.nextServiceAt ? day(a.nextServiceAt) + (a.due ? ' ⚠️' : a.dueSoon ? ' ⏳' : '') : '—'}</td></tr>`).join('')}</table>` : '<p class="muted mt">Sin activos registrados. Añade equipos con cadencia para generar mantenimiento preventivo automático.</p>'}
+      </div>`;
   }
 
   async function viewPayments() {

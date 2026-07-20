@@ -253,6 +253,44 @@ async function main() {
       assert.ok(ret.data.resolvedAt);
     });
 
+    // ===== Activos + mantenimiento preventivo (§31) =====
+    let assetId, prevOrderId;
+    await test('registrar un activo con cadencia y servicio vencido', async () => {
+      const past = new Date(Date.now() - 5 * 86400000).toISOString();
+      const { status, data } = await api('/api/ops/assets', { method: 'POST', body: { propertyId, name: 'Ascensor principal', category: 'elevator', location: 'Torre A', intervalDays: 90, nextServiceAt: past } });
+      assert.equal(status, 201);
+      assert.equal(data.intervalDays, 90);
+      assetId = data.id;
+      const list = await api(`/api/ops/assets?propertyId=${propertyId}`);
+      const a = list.data.find(x => x.id === assetId);
+      assert.equal(a.due, true, 'el activo aparece como vencido');
+    });
+
+    await test('generar preventivas crea una orden para el activo vencido', async () => {
+      const { status, data } = await api('/api/ops/maintenance/preventive/run', { method: 'POST', body: { propertyId } });
+      assert.equal(status, 200);
+      assert.ok(data.generated >= 1, 'genera al menos una orden');
+      const orders = await api(`/api/ops/maintenance/orders?propertyId=${propertyId}`);
+      const po = orders.data.find(o => o.assetId === assetId && o.preventive);
+      assert.ok(po, 'existe la orden preventiva ligada al activo');
+      prevOrderId = po.id;
+    });
+
+    await test('volver a generar preventivas es idempotente (no duplica)', async () => {
+      const { data } = await api('/api/ops/maintenance/preventive/run', { method: 'POST', body: { propertyId } });
+      assert.equal(data.generated, 0, 'no crea otra orden mientras la anterior sigue abierta');
+    });
+
+    await test('resolver la orden preventiva reprograma el activo', async () => {
+      const res = await api(`/api/ops/maintenance/orders/${prevOrderId}`, { method: 'PATCH', body: { status: 'resolved', cost: 120000 } });
+      assert.equal(res.status, 200);
+      const list = await api(`/api/ops/assets?propertyId=${propertyId}`);
+      const a = list.data.find(x => x.id === assetId);
+      assert.equal(a.status, 'operational');
+      assert.equal(a.due, false, 'el próximo servicio quedó en el futuro');
+      assert.ok(a.lastServiceAt, 'registra la fecha del último servicio');
+    });
+
     // ===== Encuestas post-estadía + quejas (§37) =====
     await test('el check-out crea una encuesta post-estadía', async () => {
       await settle(400);
