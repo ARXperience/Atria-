@@ -881,7 +881,7 @@ model Invoice {
   subtotal      Float
   tax           Float
   total         Float
-  status        String   @default("draft") // draft | pending | validated | rejected | error
+  status        String   @default("draft") // draft | pending | validated | rejected | error | annulled
   provider      String   @default("dataico")
   providerRef   String?  // uuid Dataico
   cufe          String?
@@ -892,6 +892,26 @@ model Invoice {
   updatedAt     DateTime @updatedAt
 
   @@index([propertyId, status])
+}
+
+// Notas crédito/débito (§16): ajustan o anulan una factura emitida.
+model FiscalNote {
+  id          String   @id @default(cuid())
+  propertyId  String
+  invoiceId   String
+  type        String   // credit | debit
+  reason      String
+  amount      Float
+  fullNumber  String?  // NC-1001 / ND-1001
+  status      String   @default("draft") // draft | issued
+  provider    String   @default("dataico")
+  providerRef String?
+  cude        String?  // código único documento electrónico (nota)
+  issuedAt    DateTime?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  @@index([propertyId, invoiceId])
 }
 
 // ===================== Atria People (RR. HH. + Nómina) =====================

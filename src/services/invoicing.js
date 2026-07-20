@@ -164,3 +164,51 @@ export async function issueInvoice(invoiceId, { user = null } = {}) {
     return updated;
   }
 }
+
+// ---- Notas crédito/débito (§16) ----
+async function nextNoteNumber(propertyId, type) {
+  const last = await prisma.fiscalNote.findFirst({ where: { propertyId, type, fullNumber: { not: null } }, orderBy: { createdAt: 'desc' } });
+  const lastNum = last?.fullNumber ? parseInt(String(last.fullNumber).split('-').pop(), 10) : 1000;
+  return (Number.isFinite(lastNum) ? lastNum : 1000) + 1;
+}
+
+// Crea una nota crédito (anula/ajusta) o débito (cargo adicional) sobre una factura.
+export async function createFiscalNote(invoiceId, { type, reason, amount, user = null } = {}) {
+  if (!['credit', 'debit'].includes(type)) throw new Error('type debe ser credit o debit');
+  if (!reason) throw new Error('La nota requiere un motivo');
+  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
+  if (!invoice) throw new Error('Factura no encontrada');
+  if (invoice.status === 'draft') throw new Error('La factura debe estar emitida antes de crear una nota');
+  const value = money(amount != null ? amount : invoice.total);
+  if (!(value > 0)) throw new Error('El valor de la nota debe ser mayor a cero');
+  if (type === 'credit' && value > invoice.total) throw new Error('La nota crédito no puede superar el total de la factura');
+  const note = await prisma.fiscalNote.create({
+    data: { propertyId: invoice.propertyId, invoiceId, type, reason, amount: value, createdBy: user?.name || null },
+  });
+  // Nota crédito por el total → anula la factura.
+  if (type === 'credit' && value === money(invoice.total)) {
+    await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'annulled' } });
+  }
+  await audit({ propertyId: invoice.propertyId, user, action: `invoice.${type}_note`, entity: 'FiscalNote', entityId: note.id, after: { invoiceId, amount: value } });
+  emitEvent('fiscal_note.created', { propertyId: invoice.propertyId, entityId: note.id, type });
+  return note;
+}
+
+export async function issueFiscalNote(id, { user = null } = {}) {
+  const note = await prisma.fiscalNote.findUnique({ where: { id } });
+  if (!note) throw new Error('Nota no encontrada');
+  if (note.status === 'issued') return note;
+  const prefix = note.type === 'credit' ? 'NC' : 'ND';
+  const number = await nextNoteNumber(note.propertyId, note.type);
+  // Con credenciales se transmitiría a la DIAN; en modo local queda numerada.
+  const updated = await prisma.fiscalNote.update({
+    where: { id },
+    data: { status: 'issued', fullNumber: `${prefix}-${number}`, issuedAt: new Date(), cude: dataicoConfigured() ? null : `LOCAL-${prefix}-${number}` },
+  });
+  await audit({ propertyId: note.propertyId, user, action: 'fiscal_note.issued', entity: 'FiscalNote', entityId: id, after: { fullNumber: updated.fullNumber } });
+  return updated;
+}
+
+export async function listFiscalNotes(invoiceId) {
+  return prisma.fiscalNote.findMany({ where: { invoiceId }, orderBy: { createdAt: 'desc' } });
+}

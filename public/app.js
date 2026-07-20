@@ -1110,6 +1110,35 @@
         render();
       } catch (err) { toast(err.message, true); }
     };
+    window._notesInv = async (id, number, total) => {
+      const notes = await get(`/invoices/${id}/notes`);
+      const m = modal(`
+        <h2>Notas crédito/débito — ${esc(number || 'borrador')}</h2>
+        <p class="muted" style="font-size:12.5px">Factura por ${cop(total)}. La nota crédito ajusta/anula; la nota débito agrega un cargo. Una nota crédito por el total anula la factura.</p>
+        <div id="ntList">${notes.length ? notes.map(n => `
+          <div class="card" style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+            <div><b>${n.type === 'credit' ? 'Nota crédito' : 'Nota débito'}</b> · ${cop(n.amount)}
+              <div class="muted" style="font-size:12px">${esc(n.reason)}</div></div>
+            <div>${n.status === 'issued' ? `${badge(esc(n.fullNumber), 'green')}` : `<button class="btn small" onclick="_issueNote('${n.id}')">Emitir</button>`}</div>
+          </div>`).join('') : '<p class="muted">Sin notas.</p>'}</div>
+        <h3 class="mt">Nueva nota</h3>
+        <div class="row">
+          <div><label>Tipo</label><select id="ntType"><option value="credit">Nota crédito</option><option value="debit">Nota débito</option></select></div>
+          <div><label>Valor</label><input id="ntAmount" type="number" value="${total}"></div>
+        </div>
+        <label>Motivo</label><input id="ntReason" placeholder="Devolución, corrección, cargo adicional...">
+        <button class="btn mt" id="ntGen">Crear nota</button>`);
+      m.querySelector('#ntGen').onclick = async () => {
+        try {
+          await api(`/invoices/${id}/notes`, { method: 'POST', body: { type: m.querySelector('#ntType').value, amount: +m.querySelector('#ntAmount').value, reason: m.querySelector('#ntReason').value } });
+          toast('Nota creada'); m.remove(); render();
+        } catch (err) { toast(err.message, true); }
+      };
+      window._issueNote = async nid => {
+        try { const { data } = await api(`/invoices/notes/${nid}/issue`, { method: 'POST' }); toast(`Nota ${data.fullNumber} emitida`); m.remove(); render(); }
+        catch (err) { toast(err.message, true); }
+      };
+    };
     return `
       <div class="card"><h3>Proveedor tecnológico DIAN</h3>
         ${dataicoConfigured
@@ -1123,7 +1152,9 @@
           <td>${cop(i.subtotal)}</td><td>${cop(i.tax)}</td><td><b>${cop(i.total)}</b></td>
           <td>${sb(i.status)}${i.errorMsg ? `<div class="muted" style="font-size:10.5px;max-width:200px">${esc(i.errorMsg.slice(0, 90))}</div>` : ''}</td>
           <td class="muted" style="font-size:11px">${esc((i.cufe || '').slice(0, 12))}${i.cufe ? '…' : '—'}</td>
-          <td>${['draft', 'error'].includes(i.status) ? `<button class="btn small" onclick="_issueInv('${i.id}')">Emitir</button>` : ''}</td>
+          <td>${['draft', 'error'].includes(i.status)
+            ? `<button class="btn small" onclick="_issueInv('${i.id}')">Emitir</button>`
+            : `<button class="btn small secondary" onclick="_notesInv('${i.id}','${esc(i.fullNumber || '')}',${i.total})">Notas</button>`}</td>
         </tr>`).join('')}
       </table>${invoices.length ? '' : '<p class="muted">Sin facturas. Se generan automáticamente como borrador en cada check-out.</p>'}</div>`;
   }

@@ -374,6 +374,55 @@ async function main() {
       assert.match(data.fullNumber, /^ATR-\d+/);
     });
 
+    // ===== Notas crédito/débito (§16) =====
+    let debitNoteId, invoiceTotal;
+    await test('no se puede crear nota sobre una factura en borrador', async () => {
+      const { data } = await api(`/api/invoices?propertyId=${propertyId}`);
+      const draft = data.invoices.find(i => i.status === 'draft');
+      if (!draft) return; // si no hay borrador, se omite
+      const res = await api(`/api/invoices/${draft.id}/notes`, { method: 'POST', body: { type: 'credit', reason: 'x', amount: 1000 } });
+      assert.equal(res.status, 400);
+    });
+
+    await test('crear nota débito parcial sobre factura emitida', async () => {
+      const inv = await api(`/api/invoices/${invoiceId}/notes`); // GET lista (vacía aún)
+      assert.equal(inv.status, 200);
+      const list = await api(`/api/invoices?propertyId=${propertyId}`);
+      invoiceTotal = list.data.invoices.find(i => i.id === invoiceId).total;
+      const { status, data } = await api(`/api/invoices/${invoiceId}/notes`, { method: 'POST', body: { type: 'debit', reason: 'Cargo adicional por daño', amount: 50000 } });
+      assert.equal(status, 201);
+      assert.equal(data.type, 'debit');
+      assert.equal(data.amount, 50000);
+      assert.equal(data.status, 'draft');
+      debitNoteId = data.id;
+    });
+
+    await test('emitir la nota débito le asigna número ND-', async () => {
+      const { status, data } = await api(`/api/invoices/notes/${debitNoteId}/issue`, { method: 'POST' });
+      assert.equal(status, 200);
+      assert.equal(data.status, 'issued');
+      assert.match(data.fullNumber, /^ND-\d+/);
+    });
+
+    await test('nota crédito por el total anula la factura', async () => {
+      const { status, data } = await api(`/api/invoices/${invoiceId}/notes`, { method: 'POST', body: { type: 'credit', reason: 'Anulación total', amount: invoiceTotal } });
+      assert.equal(status, 201);
+      const issued = await api(`/api/invoices/notes/${data.id}/issue`, { method: 'POST' });
+      assert.match(issued.data.fullNumber, /^NC-\d+/);
+      const list = await api(`/api/invoices?propertyId=${propertyId}`);
+      const inv = list.data.invoices.find(i => i.id === invoiceId);
+      assert.equal(inv.status, 'annulled', 'la factura queda anulada');
+    });
+
+    await test('nota crédito no puede superar el total de la factura', async () => {
+      // se usa otra factura emitida si existe; validamos la regla creando una nueva reserva-factura no es trivial,
+      // así que probamos contra la factura ya anulada con un monto excesivo → debe rechazar por monto.
+      const list = await api(`/api/invoices?propertyId=${propertyId}`);
+      const inv = list.data.invoices.find(i => i.id === invoiceId);
+      const res = await api(`/api/invoices/${inv.id}/notes`, { method: 'POST', body: { type: 'credit', reason: 'exceso', amount: inv.total + 1_000_000 } });
+      assert.equal(res.status, 400);
+    });
+
     // ===== Atria People: nómina (Fase 3) =====
     let employeeId, periodId;
     await test('crear empleado', async () => {
@@ -984,6 +1033,7 @@ async function main() {
       assert.equal(prods.data.find(p => p.id === posProductId).stock, 970, 'la receta descontó 30 g de café');
     });
 
+    let roomServiceResvId;
     await test('room service se carga al folio de una habitación en casa', async () => {
       // Crear reserva, pagar, check-in
       const ci = futureDay(1), co = futureDay(2);
@@ -992,12 +1042,60 @@ async function main() {
       await api('/api/public/webhooks/payments/mock', { method: 'POST', body: { reference: resv.data.paymentLink.token } });
       await settle();
       await api(`/api/reservations/${resv.data.reservation.id}/checkin`, { method: 'POST', body: {} });
+      roomServiceResvId = resv.data.reservation.id;
       // Room service → cargar al folio
       const ord = await api('/api/pos/orders', { method: 'POST', body: { propertyId, type: 'room_service', reservationId: resv.data.reservation.id, items: [{ menuItemId, qty: 1 }] } });
       const charge = await api(`/api/pos/orders/${ord.data.id}/charge`, { method: 'POST' });
       assert.equal(charge.data.status, 'charged');
       const full = await api(`/api/reservations/${resv.data.reservation.id}`);
       assert.ok(full.data.folio.charges.some(c => c.concept === 'room_service'), 'el folio tiene el cargo de room service');
+    });
+
+    // ===== Acciones sensibles con aprobación real (§47/§55.6) =====
+    await test('descuento al folio requiere aprobación y publica un cargo negativo', async () => {
+      const req = await api(`/api/reservations/${roomServiceResvId}/discount`, { method: 'POST', body: { amount: 40000, reason: 'Cortesía por demora' } });
+      assert.equal(req.status, 202);
+      const approvalId = req.data.pendingApproval.id;
+      const dec = await api(`/api/approvals/${approvalId}/decide`, { method: 'POST', body: { approve: true } });
+      assert.equal(dec.status, 200);
+      const full = await api(`/api/reservations/${roomServiceResvId}`);
+      const disc = full.data.folio.charges.find(c => c.concept === 'descuento');
+      assert.ok(disc, 'existe el cargo de descuento');
+      assert.equal(disc.amount, -40000, 'el descuento es un cargo negativo');
+    });
+
+    let noDepositResvId;
+    await test('cambio de tarifa aprobado recalcula el total de la reserva', async () => {
+      const ci = futureDay(3), co = futureDay(5); // 2 noches
+      const av = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1 } });
+      const resv = await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1, roomTypeId: av.data[0].roomTypeId, guest: { fullName: 'Huésped Tarifa' } } });
+      noDepositResvId = resv.data.reservation.id;
+      const req = await api(`/api/reservations/${noDepositResvId}/rate-override`, { method: 'POST', body: { nightlyRate: 100000, reason: 'Tarifa corporativa' } });
+      assert.equal(req.status, 202);
+      const dec = await api(`/api/approvals/${req.data.pendingApproval.id}/decide`, { method: 'POST', body: { approve: true } });
+      assert.equal(dec.status, 200);
+      const full = await api(`/api/reservations/${noDepositResvId}`);
+      assert.equal(full.data.nightlyRate, 100000);
+      assert.equal(full.data.subtotal, 200000, 'subtotal = tarifa x 2 noches');
+      assert.ok(full.data.total >= full.data.subtotal, 'el total se recalculó con impuestos');
+    });
+
+    await test('exonerar anticipo aprobado deja la reserva en 0 de depósito', async () => {
+      const req = await api(`/api/reservations/${noDepositResvId}/waive-deposit`, { method: 'POST', body: { reason: 'Cliente frecuente' } });
+      assert.equal(req.status, 202);
+      const dec = await api(`/api/approvals/${req.data.pendingApproval.id}/decide`, { method: 'POST', body: { approve: true } });
+      assert.equal(dec.status, 200);
+      const full = await api(`/api/reservations/${noDepositResvId}`);
+      assert.equal(full.data.depositRequired, 0);
+    });
+
+    await test('cancelación aprobada cancela la reserva', async () => {
+      const req = await api(`/api/reservations/${noDepositResvId}/request-cancellation`, { method: 'POST', body: { reason: 'Fuerza mayor' } });
+      assert.equal(req.status, 202);
+      const dec = await api(`/api/approvals/${req.data.pendingApproval.id}/decide`, { method: 'POST', body: { approve: true } });
+      assert.equal(dec.status, 200);
+      const full = await api(`/api/reservations/${noDepositResvId}`);
+      assert.equal(full.data.status, 'cancelled');
     });
 
     await test('no se puede cargar room service a una habitación sin check-in', async () => {

@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
-import { createInvoiceFromReservation, issueInvoice, dataicoConfigured } from '../services/invoicing.js';
+import { createInvoiceFromReservation, issueInvoice, dataicoConfigured, createFiscalNote, issueFiscalNote, listFiscalNotes } from '../services/invoicing.js';
 import { badRequest } from '../lib/util.js';
 
 export const invoicesRouter = Router();
@@ -34,5 +34,28 @@ invoicesRouter.post('/:id/issue', requirePermission('invoices.issue'), async (re
   if (!invoice || !propertyScope(req, invoice.propertyId)) return res.status(404).json({ error: 'Factura no encontrada' });
   try {
     res.json(await issueInvoice(invoice.id, { user: req.user }));
+  } catch (err) { badRequest(res, err.message); }
+});
+
+// ---- Notas crédito/débito (§16) ----
+invoicesRouter.get('/:id/notes', requirePermission('invoices.view'), async (req, res) => {
+  const invoice = await prisma.invoice.findUnique({ where: { id: req.params.id } });
+  if (!invoice || !propertyScope(req, invoice.propertyId)) return res.status(404).json({ error: 'Factura no encontrada' });
+  res.json(await listFiscalNotes(invoice.id));
+});
+
+invoicesRouter.post('/:id/notes', requirePermission('invoices.create'), async (req, res) => {
+  const invoice = await prisma.invoice.findUnique({ where: { id: req.params.id } });
+  if (!invoice || !propertyScope(req, invoice.propertyId)) return res.status(404).json({ error: 'Factura no encontrada' });
+  try {
+    res.status(201).json(await createFiscalNote(invoice.id, { type: req.body?.type, reason: req.body?.reason, amount: req.body?.amount, user: req.user }));
+  } catch (err) { badRequest(res, err.message); }
+});
+
+invoicesRouter.post('/notes/:id/issue', requirePermission('invoices.issue'), async (req, res) => {
+  const note = await prisma.fiscalNote.findUnique({ where: { id: req.params.id } });
+  if (!note || !propertyScope(req, note.propertyId)) return res.status(404).json({ error: 'Nota no encontrada' });
+  try {
+    res.json(await issueFiscalNote(note.id, { user: req.user }));
   } catch (err) { badRequest(res, err.message); }
 });

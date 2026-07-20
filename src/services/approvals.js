@@ -3,6 +3,7 @@
 import { prisma } from '../db.js';
 import { emitEvent } from '../lib/events.js';
 import { audit } from '../lib/audit.js';
+import { money } from '../lib/util.js';
 import { notify } from './notifications.js';
 
 const ROLE_RANK = { FRONTDESK: 1, SALES: 1, HOUSEKEEPING: 1, MAINTENANCE: 1, HR: 2, ACCOUNTING: 2, MANAGER: 3, OWNER: 4 };
@@ -88,6 +89,41 @@ const executors = {
   async purchase_order(payload) {
     const { approvePurchaseOrder } = await import('./inventory.js');
     return approvePurchaseOrder(payload.purchaseOrderId);
+  },
+  // Descuento sobre el folio: publica un cargo negativo (rebaja) en la cuenta.
+  async discount(payload) {
+    const folio = await prisma.folio.findUnique({ where: { reservationId: payload.reservationId } });
+    if (!folio) throw new Error('La reserva no tiene folio abierto');
+    const amount = -Math.abs(money(payload.amount));
+    const charge = await prisma.folioCharge.create({
+      data: { folioId: folio.id, concept: 'descuento', description: payload.reason || 'Descuento autorizado', amount, taxAmount: 0, postedBy: payload.approvedByName || 'aprobación' },
+    });
+    emitEvent('folio.discount_applied', { propertyId: payload.propertyId, reservationId: payload.reservationId, entityId: charge.id });
+    return charge;
+  },
+  // Cambio de tarifa: ajusta la tarifa/nocturna y recalcula totales de la reserva.
+  async rate_override(payload) {
+    const r = await prisma.reservation.findUnique({ where: { id: payload.reservationId } });
+    if (!r) throw new Error('Reserva no encontrada');
+    const nightlyRate = money(payload.nightlyRate != null ? payload.nightlyRate : r.nightlyRate);
+    const subtotal = money(nightlyRate * r.nights);
+    const taxRate = r.subtotal > 0 ? r.taxes / r.subtotal : 0;
+    const taxes = money(subtotal * taxRate);
+    const total = money(subtotal + taxes);
+    const updated = await prisma.reservation.update({ where: { id: r.id }, data: { nightlyRate, subtotal, taxes, total } });
+    emitEvent('reservation.rate_overridden', { propertyId: r.propertyId, reservationId: r.id });
+    return updated;
+  },
+  // Reserva sin anticipo: exime el depósito requerido para permitir el check-in.
+  async reservation_no_deposit(payload) {
+    const updated = await prisma.reservation.update({ where: { id: payload.reservationId }, data: { depositRequired: 0 } });
+    emitEvent('reservation.deposit_waived', { propertyId: updated.propertyId, reservationId: updated.id });
+    return updated;
+  },
+  // Cancelación con penalidad exonerada / fuera de política.
+  async cancellation(payload) {
+    const { cancelReservation } = await import('./reservations.js');
+    return cancelReservation(payload.reservationId, { reason: payload.reason || 'Cancelación aprobada', actor: 'human' });
   },
 };
 

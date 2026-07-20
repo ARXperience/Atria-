@@ -52,6 +52,62 @@ reservationsRouter.post('/:id/cancel', requirePermission('reservations.edit'), a
   } catch (err) { badRequest(res, err.message); }
 });
 
+// Descuento sobre el folio → requiere aprobación de gerente (matriz §47).
+reservationsRouter.post('/:id/discount', requirePermission('reservations.edit'), async (req, res) => {
+  const r = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+  if (!r || !propertyScope(req, r.propertyId)) return res.status(404).json({ error: 'Reserva no encontrada' });
+  const amount = +req.body?.amount;
+  if (!(amount > 0)) return badRequest(res, 'amount > 0 requerido');
+  const approval = await requestApproval({
+    propertyId: r.propertyId, type: 'discount',
+    summary: `Descuento de ${fmtCOP(amount)} en reserva ${r.code}${req.body?.reason ? ` — ${req.body.reason}` : ''}.`,
+    payload: { propertyId: r.propertyId, reservationId: r.id, amount, reason: req.body?.reason || null, approvedByName: req.user?.name },
+    requiredRole: 'MANAGER', user: req.user,
+  });
+  res.status(202).json({ pendingApproval: approval });
+});
+
+// Cambio de tarifa fuera de la lista → aprobación de gerente.
+reservationsRouter.post('/:id/rate-override', requirePermission('reservations.edit'), async (req, res) => {
+  const r = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+  if (!r || !propertyScope(req, r.propertyId)) return res.status(404).json({ error: 'Reserva no encontrada' });
+  const nightlyRate = +req.body?.nightlyRate;
+  if (!(nightlyRate > 0)) return badRequest(res, 'nightlyRate > 0 requerido');
+  const approval = await requestApproval({
+    propertyId: r.propertyId, type: 'rate_override',
+    summary: `Cambio de tarifa a ${fmtCOP(nightlyRate)}/noche en reserva ${r.code} (actual ${fmtCOP(r.nightlyRate)}).`,
+    payload: { reservationId: r.id, nightlyRate, reason: req.body?.reason || null },
+    requiredRole: 'MANAGER', user: req.user,
+  });
+  res.status(202).json({ pendingApproval: approval });
+});
+
+// Exonerar anticipo de la reserva → aprobación de gerente.
+reservationsRouter.post('/:id/waive-deposit', requirePermission('reservations.edit'), async (req, res) => {
+  const r = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+  if (!r || !propertyScope(req, r.propertyId)) return res.status(404).json({ error: 'Reserva no encontrada' });
+  const approval = await requestApproval({
+    propertyId: r.propertyId, type: 'reservation_no_deposit',
+    summary: `Exonerar anticipo (${fmtCOP(r.depositRequired)}) de la reserva ${r.code}.`,
+    payload: { reservationId: r.id, reason: req.body?.reason || null },
+    requiredRole: 'MANAGER', user: req.user,
+  });
+  res.status(202).json({ pendingApproval: approval });
+});
+
+// Cancelación fuera de política (con penalidad / estadía en curso) → aprobación.
+reservationsRouter.post('/:id/request-cancellation', requirePermission('reservations.edit'), async (req, res) => {
+  const r = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+  if (!r || !propertyScope(req, r.propertyId)) return res.status(404).json({ error: 'Reserva no encontrada' });
+  const approval = await requestApproval({
+    propertyId: r.propertyId, type: 'cancellation',
+    summary: `Cancelación de la reserva ${r.code} (estado ${r.status})${req.body?.reason ? ` — ${req.body.reason}` : ''}.`,
+    payload: { reservationId: r.id, reason: req.body?.reason || null },
+    requiredRole: 'MANAGER', user: req.user,
+  });
+  res.status(202).json({ pendingApproval: approval });
+});
+
 reservationsRouter.post('/:id/checkin', requirePermission('reservations.checkin'), async (req, res) => {
   const r = await prisma.reservation.findUnique({ where: { id: req.params.id } });
   if (!r || !propertyScope(req, r.propertyId)) return res.status(404).json({ error: 'Reserva no encontrada' });
