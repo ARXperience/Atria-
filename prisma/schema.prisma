@@ -601,6 +601,43 @@ model PurchaseOrder {
 }
 
 // ===================== Atria Finance (§28) =====================
+
+// Cierre de caja (§28): apertura con base, cierre con conteo vs esperado.
+model CashClosure {
+  id             String   @id @default(cuid())
+  propertyId     String
+  openedBy       String?
+  openedAt       DateTime @default(now())
+  openingBalance Float    @default(0)
+  status         String   @default("open") // open | closed
+  closedBy       String?
+  closedAt       DateTime?
+  cashPayments   Float?   // efectivo recaudado durante el turno
+  expectedCash   Float?   // base + efectivo recaudado
+  countedAmount  Float?   // conteo físico
+  difference     Float?   // conteo − esperado (descuadre)
+  notes          String?
+
+  @@index([propertyId, status])
+}
+
+// Conciliación de pagos (§28): sistema vs pasarela/banco.
+model Reconciliation {
+  id           String   @id @default(cuid())
+  propertyId   String
+  source       String   @default("gateway") // gateway | bank
+  fromDate     DateTime
+  toDate       DateTime
+  totalSystem  Float    @default(0)
+  totalExternal Float   @default(0)
+  matched      Int      @default(0)
+  unmatched    Int      @default(0)
+  createdBy    String?
+  createdAt    DateTime @default(now())
+
+  @@index([propertyId, createdAt])
+}
+
 model AccountPayable {
   id              String   @id @default(cuid())
   propertyId      String

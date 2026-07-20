@@ -1237,13 +1237,29 @@
   }
 
   async function viewFinance() {
-    const [ov, ar, payables, pl, summary] = await Promise.all([
+    const [ov, ar, payables, pl, summary, cash] = await Promise.all([
       get(`/finance/overview?${pid()}`),
       get(`/finance/receivables?${pid()}`),
       get(`/finance/payables?${pid()}`),
       get(`/finance/report?${pid()}`),
       get(`/finance/summary?${pid()}`).catch(() => null),
+      get(`/finance/cash/current?${pid()}`).catch(() => ({ open: false })),
     ]);
+    window._cashOpen = async () => { const b = prompt('Base de apertura de caja (efectivo inicial):', '0'); if (b === null) return; try { await api('/finance/cash/open', { method: 'POST', body: { propertyId: state.propertyId, openingBalance: +b || 0 } }); toast('Caja abierta'); render(); } catch (e) { toast(e.message, true); } };
+    window._cashClose = async id => { const c = prompt('Efectivo contado en caja (conteo físico):'); if (c === null) return; try { const r = await api(`/finance/cash/${id}/close`, { method: 'POST', body: { countedAmount: +c || 0 } }); toast(r.difference === 0 ? 'Caja cuadrada ✅' : `Cerrada con descuadre de ${cop(r.difference)}`); render(); } catch (e) { toast(e.message, true); } };
+    window._reconcile = async () => {
+      const raw = prompt('Pega referencias externas (una por línea: referencia,valor). Ej:\nTRX-1,150000\nTRX-2,200000');
+      if (!raw) return;
+      const externalRefs = raw.split('\n').map(l => { const [ref, amount] = l.split(','); return { ref: (ref || '').trim(), amount: +(amount || '').trim() || 0 }; }).filter(e => e.amount > 0);
+      try {
+        const r = await api('/finance/reconcile', { method: 'POST', body: { propertyId: state.propertyId, externalRefs } });
+        modal(`<h3>Conciliación ${r.balanced ? '✅ cuadrada' : '⚠️ con diferencias'}</h3>
+          <p class="muted">Sistema: ${cop(r.totalSystem)} · Externo: ${cop(r.totalExternal)} · Conciliados: ${r.matched}</p>
+          ${r.unmatchedSystem.length ? `<div class="mt"><b>Sin conciliar en el sistema (${r.unmatchedSystem.length})</b><table>${r.unmatchedSystem.slice(0, 10).map(u => `<tr><td>${cop(u.amount)}</td><td class="muted">${esc(u.ref || '—')}</td></tr>`).join('')}</table></div>` : ''}
+          ${r.unmatchedExternal.length ? `<div class="mt"><b>Sin conciliar externas (${r.unmatchedExternal.length})</b><table>${r.unmatchedExternal.slice(0, 10).map(u => `<tr><td>${cop(u.amount)}</td><td class="muted">${esc(u.ref || '—')}</td></tr>`).join('')}</table></div>` : ''}
+          <div class="right mt"><button class="btn" onclick="this.closest('.modal-bg').remove()">Cerrar</button></div>`);
+      } catch (e) { toast(e.message, true); }
+    };
     window._apAdd = async () => {
       try { await api('/finance/payables', { method: 'POST', body: { propertyId: state.propertyId, supplierName: $('#apSup').value, concept: $('#apConcept').value, category: $('#apCat').value, amount: +$('#apAmount').value, dueDate: $('#apDue').value || null } }); toast('Cuenta por pagar creada'); render(); }
       catch (e) { toast(e.message, true); }
@@ -1266,6 +1282,14 @@
       ${summary ? `<div class="card mt" style="border-left:3px solid var(--accent);background:linear-gradient(90deg,rgba(216,176,100,.08),transparent)">
         <div class="row" style="align-items:flex-start;gap:10px"><span style="font-size:20px">🤖</span><div><div class="label" style="color:var(--accent);margin-bottom:4px">Copiloto financiero</div><div style="font-size:13.5px;line-height:1.55">${esc(summary.narrative)}</div></div></div>
       </div>` : ''}
+      <div class="card mt"><h3>💵 Caja & conciliación</h3>
+        ${cash.open ? `<div class="row" style="justify-content:space-between;align-items:center">
+          <div><b>Caja abierta</b> por ${esc(cash.openedBy || '—')} · ${dt(cash.openedAt)}
+            <div class="muted" style="font-size:12.5px">Base ${cop(cash.openingBalance)} + efectivo ${cop(cash.cashPayments)} = esperado <b>${cop(cash.expectedCash)}</b></div></div>
+          <button class="btn" onclick="_cashClose('${cash.id}')">Cerrar caja</button>
+        </div>` : `<div class="row" style="justify-content:space-between;align-items:center"><span class="muted">No hay caja abierta.</span><button class="btn" onclick="_cashOpen()">Abrir caja</button></div>`}
+        <div class="mt"><button class="btn ghost small" onclick="_reconcile()">Conciliar pagos vs pasarela/banco</button></div>
+      </div>
       <div class="grid cols-4 mt">
         <div class="kpi"><div class="label">Ingresos del mes</div><div class="value" style="color:var(--green)"><span data-count="${ov.monthIncome}" data-fmt="cop">$0</span></div></div>
         <div class="kpi"><div class="label">Egresos del mes</div><div class="value"><span data-count="${ov.monthExpenses}" data-fmt="cop">$0</span></div></div>

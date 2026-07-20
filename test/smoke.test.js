@@ -1680,6 +1680,37 @@ async function main() {
       assert.ok(!/copiloto financiero|resultado:/i.test(data.reply), 'no debe entregar el resumen financiero a housekeeping');
     });
 
+    // ===== Cierre de caja y conciliación (§28) =====
+    await test('abrir caja, registrar pago en efectivo y cerrar con conteo', async () => {
+      const open = await api('/api/finance/cash/open', { method: 'POST', body: { propertyId, openingBalance: 100000 } });
+      assert.equal(open.status, 201);
+      // Un pago manual en efectivo durante el turno (requiere aprobación → aprobar)
+      const link = await api('/api/payments/manual', { method: 'POST', body: { propertyId, concept: 'Pago efectivo caja', amount: 50000, method: 'cash' } }).catch(() => ({ status: 0 }));
+      // Cerrar con conteo = base + lo recaudado en efectivo (si el pago manual no aplicó, expected = base)
+      const cur = await api(`/api/finance/cash/current?propertyId=${propertyId}`);
+      const counted = cur.data.expectedCash; // conteo exacto → sin descuadre
+      const close = await api(`/api/finance/cash/${open.data.id}/close`, { method: 'POST', body: { countedAmount: counted } });
+      assert.equal(close.status, 200);
+      assert.equal(close.data.status, 'closed');
+      assert.equal(close.data.difference, 0, 'conteo exacto no debe descuadrar');
+    });
+
+    await test('no se puede abrir dos cajas a la vez', async () => {
+      const a = await api('/api/finance/cash/open', { method: 'POST', body: { propertyId, openingBalance: 0 } });
+      assert.equal(a.status, 201);
+      const b = await api('/api/finance/cash/open', { method: 'POST', body: { propertyId, openingBalance: 0 } });
+      assert.equal(b.status, 400);
+      // cerrar la abierta para no dejar estado colgante
+      await api(`/api/finance/cash/${a.data.id}/close`, { method: 'POST', body: { countedAmount: 0 } });
+    });
+
+    await test('conciliación empareja pagos del sistema con referencias externas', async () => {
+      const rep = await api('/api/finance/reconcile', { method: 'POST', body: { propertyId, externalRefs: [{ ref: 'X-DESCONOCIDA', amount: 999999999 }] } });
+      assert.equal(rep.status, 200);
+      assert.ok(typeof rep.data.matched === 'number');
+      assert.ok(rep.data.unmatchedExternal.length >= 1, 'la referencia externa inventada queda sin conciliar');
+    });
+
     // ===== Multi-tenant, planes y facturación SaaS (§55.1) =====
     await test('la suscripción muestra plan y consumo vs límites', async () => {
       const { status, data } = await api('/api/saas/subscription');
