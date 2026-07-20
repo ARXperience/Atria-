@@ -1462,6 +1462,45 @@ async function main() {
       assert.equal(r.data.ok, true);
     });
 
+    // ===== Automatizador visual (§40) =====
+    let ruleId;
+    await test('disparador inválido de regla se rechaza', async () => {
+      const r = await api('/api/automations/rules', { method: 'POST', body: { propertyId, name: 'X', trigger: 'inexistente', actionType: 'log' } });
+      assert.equal(r.status, 400);
+    });
+
+    await test('crear regla no-code (reserva confirmada → notificar)', async () => {
+      const r = await api('/api/automations/rules', { method: 'POST', body: { propertyId, name: 'Aviso de reserva confirmada', trigger: 'reservation.confirmed', actionType: 'notify', actionParams: { role: 'MANAGER', title: 'Nueva reserva', severity: 'info' } } });
+      assert.equal(r.status, 201);
+      ruleId = r.data.id;
+      assert.equal(r.data.enabled, true);
+      assert.equal(r.data.runCount, 0);
+    });
+
+    await test('probar la regla la ejecuta', async () => {
+      const r = await api(`/api/automations/rules/${ruleId}/test`, { method: 'POST', body: { payload: {} } });
+      assert.equal(r.status, 200);
+      assert.equal(r.data.executed, true);
+    });
+
+    await test('la regla se dispara con un evento real de dominio', async () => {
+      const before = (await api(`/api/automations/overview?propertyId=${propertyId}`)).data.rules.find(x => x.id === ruleId).runCount;
+      // Nueva reserva + pago → emite reservation.confirmed
+      const aIn = futureDay(200), aOut = futureDay(202);
+      const { data: avail } = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: aIn, checkOut: aOut, adults: 1 } });
+      const bk = await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: aIn, checkOut: aOut, adults: 1, roomTypeId: avail[0].roomTypeId, ratePlanId: avail[0].ratePlans[0]?.ratePlanId, guest: { fullName: 'Auto Regla', phone: '573001239876', documentNumber: '700700700', nationality: 'CO' } } });
+      await api('/api/public/webhooks/payments/mock', { method: 'POST', body: { reference: bk.data.paymentLink.token } });
+      await settle(700);
+      const after = (await api(`/api/automations/overview?propertyId=${propertyId}`)).data.rules.find(x => x.id === ruleId).runCount;
+      assert.ok(after > before, `la regla debió ejecutarse (${before} → ${after})`);
+    });
+
+    await test('pausar la regla evita que se dispare', async () => {
+      await api(`/api/automations/rules/${ruleId}`, { method: 'PATCH', body: { enabled: false } });
+      const ov = await api(`/api/automations/overview?propertyId=${propertyId}`);
+      assert.equal(ov.data.rules.find(x => x.id === ruleId).enabled, false);
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

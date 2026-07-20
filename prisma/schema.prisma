@@ -1358,3 +1358,23 @@ model Integration {
   @@unique([propertyId, provider])
   @@index([propertyId, category])
 }
+
+// ===== Automatizador visual (§40) — reglas no-code sobre el bus de eventos =====
+model AutomationRule {
+  id          String   @id @default(cuid())
+  propertyId  String
+  name        String
+  trigger     String   // nombre del evento de dominio (reservation.confirmed…)
+  conditions  String?  // JSON: [{field, op, value}]
+  actionType  String   // notify | housekeeping_task | log
+  actionParams String? // JSON con parámetros de la acción
+  enabled     Boolean  @default(true)
+  runCount    Int      @default(0)
+  lastRunAt   DateTime?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([propertyId, enabled])
+  @@index([propertyId, trigger])
+}
