@@ -104,6 +104,13 @@ async function opsRiskSignals(propertyId) {
     const urgent = hp.tasks.filter(t => t.score >= 70).length;
     if (urgent > 0 && hp.arrivalsToday > 0) out.push({ area: 'housekeeping', permission: 'housekeeping.view', severity: 'warning', title: `${urgent} habitación(es) urgentes por limpiar para llegadas de hoy`, detail: `Hay ${hp.arrivalsToday} llegada(s) hoy y ${hp.unassigned} tarea(s) sin asignar. Prioriza para tener las habitaciones listas.`, action: 'Housekeeping → Plan priorizado → asignar automáticamente.', metric: urgent });
   } catch { /* */ }
+  // Anomalías: valores atípicos/inconsistentes que requieren revisión.
+  try {
+    const { detectAnomalies } = await import('./anomalies.js');
+    const an = await detectAnomalies(propertyId);
+    if (an.counts.high > 0) out.push({ area: 'audit', permission: 'audit.view', severity: 'critical', title: `${an.counts.high} anomalía(s) crítica(s) detectada(s)`, detail: `${an.anomalies.filter(a => a.severity === 'high')[0]?.title || 'Revisar el radar de anomalías'}. Posibles errores o fraude — revisar de inmediato.`, action: 'Auditoría → Radar de anomalías.', metric: an.counts.high });
+    else if (an.counts.warning > 0) out.push({ area: 'audit', permission: 'audit.view', severity: 'warning', title: `${an.counts.warning} anomalía(s) por revisar`, detail: `El radar detectó valores atípicos (pagos/nómina/inventario/reservas) que conviene verificar.`, action: 'Auditoría → Radar de anomalías.', metric: an.counts.warning });
+  } catch { /* */ }
   // Cocina: insumos que no alcanzan para la demanda proyectada.
   try {
     const { kitchenForecast } = await import('./kitchen.js');

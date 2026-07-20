@@ -701,6 +701,26 @@ async function main() {
       assert.ok(rows.every(r => r.split(',')[1] === 'ai'), 'todas las filas son del actor IA');
     });
 
+    // ===== Radar de anomalías (§42) =====
+    await test('el radar de anomalías devuelve estructura y conteos', async () => {
+      const { status, data } = await api(`/api/ai/anomalies?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(Array.isArray(data.anomalies) && 'counts' in data && typeof data.total === 'number');
+    });
+
+    await test('el radar detecta horas extra atípicas de un empleado', async () => {
+      const emp = await api('/api/hr/employees', { method: 'POST', body: { propertyId, fullName: 'Ana Extra Test', documentNumber: '900555111', position: 'Mesera', area: 'restaurante', salary: 1300000, hireDate: '2026-01-01', riskClass: 1, eps: 'Sanitas', afp: 'Porvenir', arl: 'Sura' } });
+      // 3 novedades de 20h extra aprobadas este mes = 60h (> umbral 40h).
+      for (let k = 0; k < 3; k++) {
+        const n = await api('/api/hr/novelties', { method: 'POST', body: { propertyId, employeeId: emp.data.id, type: 'overtime_day', date: futureDay(-2), hours: 20 } });
+        await api(`/api/hr/novelties/${n.data.id}/decide`, { method: 'POST', body: { approve: true } });
+      }
+      const { data } = await api(`/api/ai/anomalies?propertyId=${propertyId}`);
+      const hit = data.anomalies.find(a => a.area === 'payroll' && /Ana Extra Test/.test(a.title));
+      assert.ok(hit, 'detecta las horas extra atípicas');
+      assert.equal(hit.severity, 'warning');
+    });
+
     // ===== Canales de notificación configurables (§44) =====
     let notifChannelId;
     await test('crear un canal de notificación por email', async () => {

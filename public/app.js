@@ -2909,13 +2909,25 @@
       if (f.to) q += `&to=${f.to}`;
       return q;
     };
-    const logs = await get(`/audit-logs?${qs()}`);
+    const [logs, radar] = await Promise.all([
+      get(`/audit-logs?${qs()}`),
+      get(`/ai/anomalies?${pid()}`).catch(() => null),
+    ]);
     window._auditApply = () => {
       state._auditFilter = { actor: $('#auActor').value, action: $('#auAction').value.trim(), from: $('#auFrom').value, to: $('#auTo').value };
       render();
     };
     window._auditExport = () => _dl(`/audit-logs/export?${qs()}`, `auditoria-${new Date().toISOString().slice(0, 10)}.csv`);
+    const anomSev = { high: badge('crítica', 'red'), warning: badge('revisar', 'yellow'), info: badge('info', 'gray') };
+    const areaLbl = { inventory: 'Inventario', payroll: 'Nómina', payments: 'Pagos', reservations: 'Reservas' };
+    const radarCard = radar ? `<div class="card" ${radar.counts.high ? 'style="border-left:3px solid var(--red)"' : ''}>
+      <h3>🛰️ Radar de anomalías ${radar.total ? `<span class="muted" style="font-size:12px;font-weight:400">— ${radar.counts.high} críticas · ${radar.counts.warning} por revisar</span>` : ''}</h3>
+      ${radar.anomalies.length ? `<table class="mt"><tr><th>Severidad</th><th>Área</th><th>Hallazgo</th><th>Detalle</th></tr>
+        ${radar.anomalies.map(a => `<tr><td>${anomSev[a.severity] || a.severity}</td><td>${esc(areaLbl[a.area] || a.area)}</td><td><b>${esc(a.title)}</b></td><td class="muted" style="font-size:12px">${esc(a.detail)}</td></tr>`).join('')}</table>`
+        : '<p class="muted mt">✅ Sin anomalías detectadas en pagos, nómina, inventario ni reservas.</p>'}
+    </div>` : '';
     return `
+      ${radarCard}
       <div class="card"><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap">
         <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
           <div><label>Actor</label><select id="auActor"><option value="">Todos</option><option value="human" ${f.actor === 'human' ? 'selected' : ''}>Humano</option><option value="ai" ${f.actor === 'ai' ? 'selected' : ''}>IA</option><option value="system" ${f.actor === 'system' ? 'selected' : ''}>Sistema</option></select></div>

@@ -2,9 +2,16 @@
 import { Router } from 'express';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
 import { buildInsights, insightsBriefing } from '../services/ai/advisor.js';
+import { detectAnomalies } from '../services/ai/anomalies.js';
 import { audit } from '../lib/audit.js';
 
 export const aiRouter = Router();
+
+// Radar de anomalías: valores atípicos/inconsistentes en pagos, nómina, inventario y reservas.
+aiRouter.get('/anomalies', requirePermission('audit.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await detectAnomalies(req.query.propertyId));
+});
 
 // Recomendaciones priorizadas de la sede, filtradas por el rol del usuario.
 aiRouter.get('/insights', requirePermission('dashboard.view'), async (req, res) => {
