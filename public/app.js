@@ -4,6 +4,7 @@
   let state = {
     token: localStorage.getItem('atria_token'),
     user: JSON.parse(localStorage.getItem('atria_user') || 'null'),
+    permissions: JSON.parse(localStorage.getItem('atria_perms') || '[]'),
     company: JSON.parse(localStorage.getItem('atria_company') || 'null'),
     properties: JSON.parse(localStorage.getItem('atria_props') || '[]'),
     propertyId: localStorage.getItem('atria_prop') || null,
@@ -155,14 +156,19 @@
           return;
         }
         state.token = data.token; state.user = data.user; state.properties = data.properties; state.company = data.company;
+        state.permissions = data.permissions || [];
         state.propertyId = data.properties[0]?.id || null;
         localStorage.setItem('atria_token', data.token);
         localStorage.setItem('atria_user', JSON.stringify(data.user));
+        localStorage.setItem('atria_perms', JSON.stringify(state.permissions));
         localStorage.setItem('atria_company', JSON.stringify(data.company || null));
         localStorage.setItem('atria_props', JSON.stringify(data.properties));
         localStorage.setItem('atria_prop', state.propertyId || '');
         applyBranding(data.company);
         state.justLoggedIn = true;
+        // Landing contextual por área: cada rol aterriza en su vista más útil.
+        state.view = landingForRole(state.user.role);
+        location.hash = state.view;
         render();
       } catch (err) { toast(err.message, true); }
     };
@@ -172,6 +178,52 @@
   }
 
   // ---------- shell ----------
+  // ¿El rol del usuario tiene el permiso? Espeja la lógica del backend (wildcards).
+  function can(perm) {
+    if (!perm) return true;
+    const perms = state.permissions || [];
+    if (perms.includes('*') || state.user?.isSuperAdmin) return true;
+    if (perms.includes(perm)) return true;
+    return perms.includes(`${perm.split('.')[0]}.*`);
+  }
+  // Permiso requerido por cada módulo del menú (para adaptar la navegación al área).
+  const NAV_PERM = {
+    portfolio: 'dashboard.view', dashboard: 'dashboard.view', rooms: 'rooms.view',
+    reservations: 'reservations.view', booking: 'booking.create', housekeeping: 'housekeeping.view',
+    maintenance: 'maintenance.view', guestrequests: 'reservations.view', inbox: 'inbox.view',
+    crm: 'crm.view', corporate: 'crm.view', marketing: 'marketing.view', reputation: 'reputation.view',
+    events: 'events.view', payments: 'payments.view', invoices: 'invoices.view', copilot: 'dashboard.view',
+    content: 'content.view', site: 'content.view', agent: 'content.view', employees: 'hr.view',
+    shifts: 'hr.view', payroll: 'payroll.view', sgsst: 'sgsst.view', revenue: 'revenue.view',
+    channels: 'channels.view', inventory: 'inventory.view', pos: 'pos.view', finance: 'finance.view',
+    approvals: 'approvals.view', compliance: 'compliance.view', dataprotection: 'dataprotection.view',
+    fontur: 'fontur.view', documents: 'documents.view', audit: 'audit.view', notifchannels: 'notifications.view',
+    integrations: 'integrations.view', automations: 'automations.view', onboarding: 'settings.edit',
+    datagov: 'settings.view', subscription: 'dashboard.view', saasadmin: '__superadmin', settings: 'settings.view',
+  };
+  // Vista de aterrizaje por rol: cada área entra a lo que más usa.
+  function landingForRole(role) {
+    const home = { FRONTDESK: 'reservations', HOUSEKEEPING: 'housekeeping', MAINTENANCE: 'maintenance', SALES: 'crm', ACCOUNTING: 'finance', HR: 'employees', AUDITOR: 'audit' };
+    const target = home[role] || 'dashboard';
+    return can(NAV_PERM[target]) ? target : 'dashboard';
+  }
+  // Navegación adaptada al rol: oculta los módulos sin permiso y las secciones
+  // que quedan vacías, para que cada área vea solo lo suyo.
+  function navForRole() {
+    const visible = NAV.filter(([id]) => {
+      if (id === 'sep') return true;
+      const perm = NAV_PERM[id];
+      if (perm === '__superadmin') return !!state.user?.isSuperAdmin;
+      return can(perm);
+    });
+    // Elimina separadores sin ítems debajo.
+    return visible.filter(([id], i) => {
+      if (id !== 'sep') return true;
+      const next = visible[i + 1];
+      return next && next[0] !== 'sep';
+    });
+  }
+
   const NAV = [
     ['sep', 'Operación'],
     ['portfolio', '🏢 Portafolio'],
@@ -238,7 +290,7 @@
           <div class="brand">ATR<b>IA</b></div>
           <div class="brand-sub">${state.company?.commercialName ? esc(state.company.commercialName) : 'HOSPITALITY OS'}</div>
           <nav class="nav">
-            ${NAV.filter(([id]) => id !== 'saasadmin' || state.user.isSuperAdmin).map(([id, label]) => id === 'sep'
+            ${navForRole().map(([id, label]) => id === 'sep'
               ? `<div class="sep">${label}</div>`
               : `<a href="#${id}" class="${state.view === id ? 'active' : ''}">${label}</a>`).join('')}
           </nav>
@@ -3375,6 +3427,12 @@
     if (state.view.startsWith('res:')) {
       title = 'Detalle de reserva'; fn = viewReservationDetail; arg = state.view.slice(4);
     } else {
+      // Guarda de acceso: un módulo fuera del alcance del rol muestra un aviso.
+      const perm = NAV_PERM[state.view];
+      if (perm && perm !== '__superadmin' && !can(perm)) {
+        renderShell(`<div class="card"><h3>Acceso restringido</h3><p class="muted">Tu rol (${esc(state.user.role)}) no tiene acceso a este módulo. Usa el menú de tu área.</p></div>`, 'Sin acceso');
+        return;
+      }
       [title, fn] = VIEWS[state.view] || VIEWS.dashboard;
     }
     renderShell('<p class="muted">Cargando…</p>', title);

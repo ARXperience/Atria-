@@ -74,6 +74,16 @@ async function main() {
       assert.equal(status, 401);
     });
 
+    await test('el login expone los permisos del rol para adaptar la navegación', async () => {
+      const owner = await api('/api/auth/login', { method: 'POST', body: { email: 'owner@atria.co', password: 'atria2026' } });
+      assert.ok(owner.data.permissions.includes('*'), 'el dueño tiene acceso total');
+      const hk = await api('/api/auth/login', { method: 'POST', body: { email: 'housekeeping@atria.co', password: 'atria2026' } });
+      assert.ok(Array.isArray(hk.data.permissions) && hk.data.permissions.length > 0, 'devuelve permisos del rol');
+      const flat = hk.data.permissions.join(' ');
+      assert.ok(/housekeeping/.test(flat), 'housekeeping ve su área');
+      assert.ok(!hk.data.permissions.includes('*') && !/finance\.\*|payroll\.\*/.test(flat), 'housekeeping NO ve finanzas/nómina');
+    });
+
     await test('endpoint protegido sin token → 401', async () => {
       const res = await fetch(`${BASE}/api/reservations?propertyId=${propertyId}`);
       assert.equal(res.status, 401);
@@ -1442,6 +1452,25 @@ async function main() {
       assert.equal(charge.data.status, 'charged');
       const full = await api(`/api/reservations/${resv.data.reservation.id}`);
       assert.ok(full.data.folio.charges.some(c => c.concept === 'room_service'), 'el folio tiene el cargo de room service');
+    });
+
+    await test('room service conversacional: el agente toma el pedido por nombre y lo carga a la habitación', async () => {
+      const { orderRoomServiceByName } = await import('../src/services/pos.js');
+      const full = await api(`/api/reservations/${roomServiceResvId}`);
+      const r = await orderRoomServiceByName({ propertyId, reservationCode: full.data.code, items: [{ name: 'café americano', qty: 2 }] });
+      assert.equal(r.cargadoAHabitacion, true);
+      assert.ok(r.pedido.some(p => /café/i.test(p)), 'reconoce el plato de la carta por nombre');
+      const after = await api(`/api/reservations/${roomServiceResvId}`);
+      const charges = after.data.folio.charges.filter(c => c.concept === 'room_service');
+      assert.ok(charges.length >= 2, 'el pedido quedó cargado al folio de la habitación');
+    });
+
+    await test('room service exige estadía en curso (rechaza sin check-in)', async () => {
+      const { orderRoomServiceByName } = await import('../src/services/pos.js');
+      await assert.rejects(
+        orderRoomServiceByName({ propertyId, reservationCode: reservation.code, items: [{ name: 'café americano' }] }),
+        /estad[ií]a|check-in|reserva/i,
+      );
     });
 
     await test('check-out express desde el portal detecta el saldo pendiente (§14)', async () => {

@@ -6,6 +6,7 @@ import { buildQuote } from '../quote.js';
 import { createTentativeReservation } from '../reservations.js';
 import { createPaymentLink } from '../payments.js';
 import { knowledgeSnapshot } from '../knowledge.js';
+import { orderRoomServiceByName } from '../pos.js';
 import { notify } from '../notifications.js';
 import { parseDay, dayStr, fmtCOP } from '../../lib/util.js';
 import { audit } from '../../lib/audit.js';
@@ -90,6 +91,25 @@ export function buildTools({ propertyId, profile, conversation }) {
       async run({ mensaje, area = 'FRONTDESK' }) {
         await notify({ propertyId, audienceRole: area, severity: 'info', title: 'Solicitud vía agente IA', body: mensaje });
         return { ok: true };
+      },
+    },
+    pedir_room_service: {
+      description: 'Toma un pedido de room service de la carta para un huésped EN ESTADÍA y lo carga a su habitación. Usa los nombres de los platos tal como los dice el huésped. Si no está identificado, pide el código de reserva (ATR-…).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          reservationCode: { type: 'string', description: 'Código de la reserva del huésped, opcional si ya está identificado' },
+          items: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, qty: { type: 'number' } }, required: ['name'] } },
+        },
+        required: ['items'],
+      },
+      async run({ reservationCode, items }) {
+        try {
+          const r = await orderRoomServiceByName({ propertyId, reservationCode: reservationCode || null, contactPhone: conversation?.contactPhone || null, items });
+          await audit({ propertyId, actor: 'ai', action: 'ai.action_executed', entity: 'PosOrder', after: { tool: 'pedir_room_service', reserva: r.code } });
+          await notify({ propertyId, audienceRole: 'FRONTDESK', severity: 'info', title: `Room service · ${r.code}`, body: `Pedido por el agente: ${r.pedido.join(', ')}.` });
+          return r;
+        } catch (err) { return { error: err.message }; }
       },
     },
   };

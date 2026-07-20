@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../db.js';
 import { config } from '../config.js';
-import { signToken, authRequired } from '../middleware/auth.js';
+import { signToken, authRequired, permissionsForRole } from '../middleware/auth.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
 import { validatePassword } from '../lib/password.js';
@@ -46,6 +46,7 @@ authRouter.post('/login', async (req, res) => {
   res.json({
     token: await issueSession(user, req),
     user: { id: user.id, name: user.name, email: user.email, role: user.role, twoFactorEnabled: user.twoFactorEnabled, isSuperAdmin: user.isSuperAdmin },
+    permissions: permissionsForRole(user.role),
     company: await companyBranding(user.companyId),
     properties: await accessibleProperties(user),
   });
@@ -54,6 +55,7 @@ authRouter.post('/login', async (req, res) => {
 authRouter.get('/me', authRequired, async (req, res) => {
   res.json({
     user: { id: req.user.id, name: req.user.name, email: req.user.email, role: req.user.role, twoFactorEnabled: req.user.twoFactorEnabled, isSuperAdmin: req.user.isSuperAdmin },
+    permissions: permissionsForRole(req.user.role),
     company: await companyBranding(req.user.companyId),
     properties: await accessibleProperties(req.user),
   });

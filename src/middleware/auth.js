@@ -45,6 +45,12 @@ export function hasPermission(role, perm) {
   return perms.includes(`${domain}.*`);
 }
 
+// Lista de permisos efectivos del rol (para que el frontend adapte la
+// navegación a cada área). '*' = acceso total.
+export function permissionsForRole(role) {
+  return PERMISSIONS[role] || [];
+}
+
 export function signToken(user, jti = null) {
   return jwt.sign(
     { sub: user.id, role: user.role, companyId: user.companyId, name: user.name, ...(jti ? { jti } : {}) },
