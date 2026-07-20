@@ -1556,6 +1556,17 @@ async function main() {
       assert.ok(data.ecosystem.upcomingEvents >= 1, 'debe reflejar los eventos futuros creados antes');
     });
 
+    await test('ningún endpoint de integraciones expone el secreto en claro', async () => {
+      const secret = 'ULTRA-SECRETO-NO-DEBE-FILTRARSE-9988';
+      await api('/api/integrations/expedia/connect', { method: 'POST', body: { propertyId, config: { hotelId: 'H-9', apiKey: secret } } });
+      const ov = JSON.stringify((await api(`/api/integrations/overview?propertyId=${propertyId}`)).data);
+      assert.ok(!ov.includes(secret), 'el overview no debe contener el secreto en claro');
+      const cat = JSON.stringify((await api('/api/integrations/catalog')).data);
+      assert.ok(!cat.includes(secret), 'el catálogo no debe contener secretos');
+      const masked = (await api('/api/integrations/overview?propertyId=' + propertyId)).data.items.find(i => i.provider === 'expedia');
+      assert.ok(String(masked.config.apiKey).includes('••'), 'la clave debe mostrarse enmascarada');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {
