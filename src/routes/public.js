@@ -6,6 +6,7 @@ import { handleGatewayWebhook } from '../services/payments.js';
 import { upsertConversation, saveInbound, sendOutbound } from '../services/inbox.js';
 import { assistantReply } from '../services/ai/assistant.js';
 import { createReview } from '../services/reputation.js';
+import { submitPrecheckin, createGuestRequest, listGuestRequests, payBalanceLink, requestExpressCheckout } from '../services/guestPortal.js';
 import { fmtCOP, dayStr, parseDay } from '../lib/util.js';
 import { logger } from '../lib/logger.js';
 
@@ -189,16 +190,47 @@ publicRouter.get('/guest/reservation/:code', async (req, res) => {
     include: { guest: true, property: true, payments: true, paymentLinks: true },
   });
   if (!r) return res.status(404).json({ error: 'Reserva no encontrada' });
-  const paid = r.payments.filter(p => p.status === 'approved' && p.kind !== 'refund').reduce((s, p) => s + p.amount, 0);
+  const paid = r.payments.filter(p => p.status === 'approved' && p.kind !== 'refund').reduce((s, p) => s + p.amount, 0)
+    - r.payments.filter(p => p.status === 'approved' && p.kind === 'refund').reduce((s, p) => s + p.amount, 0);
   res.json({
     code: r.code, status: r.status, hotel: r.property.name, city: r.property.city,
     guestName: r.guest.fullName,
     checkIn: dayStr(r.checkIn), checkOut: dayStr(r.checkOut),
     nights: r.nights, adults: r.adults, children: r.children,
-    total: r.total, totalFmt: fmtCOP(r.total), paid, balance: r.total - paid,
+    total: r.total, totalFmt: fmtCOP(r.total), paid, balance: Math.round(r.total - paid),
     checkInTime: r.property.checkInTime, checkOutTime: r.property.checkOutTime,
     pendingLink: r.paymentLinks.find(l => l.status === 'active')?.token || null,
+    precheckinDone: !!r.precheckinAt, arrivalTime: r.arrivalTime,
+    guestDoc: r.guest.documentNumber, guestEmail: r.guest.email, guestPhone: r.guest.phone, guestNationality: r.guest.nationality,
   });
+});
+
+// Pre-check-in / check-in digital (§48.2)
+publicRouter.post('/guest/reservation/:code/precheckin', async (req, res) => {
+  try { res.json(await submitPrecheckin(req.params.code, req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// Solicitudes de servicio del huésped
+publicRouter.post('/guest/reservation/:code/request', async (req, res) => {
+  try { res.status(201).json(await createGuestRequest(req.params.code, { type: req.body?.type, detail: req.body?.detail })); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+publicRouter.get('/guest/reservation/:code/requests', async (req, res) => {
+  try { res.json(await listGuestRequests(req.params.code)); }
+  catch (err) { res.status(404).json({ error: err.message }); }
+});
+
+// Pagar saldo desde el portal
+publicRouter.post('/guest/reservation/:code/pay', async (req, res) => {
+  try { res.json(await payBalanceLink(req.params.code)); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// Check-out express
+publicRouter.post('/guest/reservation/:code/express-checkout', async (req, res) => {
+  try { res.json(await requestExpressCheckout(req.params.code)); }
+  catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // El huésped deja una reseña post-estancia desde su portal (con el código).

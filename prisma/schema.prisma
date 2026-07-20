@@ -365,6 +365,10 @@ model Reservation {
   holdExpiresAt DateTime?
   notes       String?
   createdBy   String?  // userId o "ai"
+  // Pre-check-in / check-in digital (§14, §48.2)
+  precheckinAt   DateTime?
+  arrivalTime    String?
+  precheckinData String?  // JSON: acompañantes, hora, políticas firmadas
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -1452,4 +1456,22 @@ model AutomationRule {
 
   @@index([propertyId, enabled])
   @@index([propertyId, trigger])
+}
+
+// ===== Portal del huésped (§14) — solicitudes de servicio =====
+model GuestRequest {
+  id            String   @id @default(cuid())
+  propertyId    String
+  reservationId String?
+  guestName     String
+  roomNumber    String?
+  type          String   // cleaning | towels | amenities | room_service | maintenance | checkout | other
+  detail        String?
+  status        String   @default("pending") // pending | in_progress | done | cancelled
+  channel       String   @default("portal") // portal | whatsapp | recepcion
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([propertyId, status])
 }

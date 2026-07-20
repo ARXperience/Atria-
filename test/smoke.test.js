@@ -142,6 +142,43 @@ async function main() {
       assert.ok(data.paid > 0);
     });
 
+    // ===== Portal del huésped: check-in digital y solicitudes (§14/§48.2) =====
+    await test('pre-check-in exige aceptar políticas y luego completa el registro', async () => {
+      const bad = await fetch(`${BASE}/api/public/guest/reservation/${reservation.code}/precheckin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ acceptPolicies: false }) });
+      assert.equal(bad.status, 400);
+      const ok = await fetch(`${BASE}/api/public/guest/reservation/${reservation.code}/precheckin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ acceptPolicies: true, arrivalTime: '15:30', documentNumber: '1099887766', nationality: 'CO', email: 'huesped@correo.co', companions: ['Ana Pérez'] }) });
+      assert.equal(ok.status, 200);
+      const info = await (await fetch(`${BASE}/api/public/guest/reservation/${reservation.code}`)).json();
+      assert.ok(info.precheckinDone, 'la reserva queda marcada con pre-check-in');
+      assert.equal(info.arrivalTime, '15:30');
+    });
+
+    let guestReqId;
+    await test('el huésped solicita un servicio y el staff lo ve', async () => {
+      const r = await fetch(`${BASE}/api/public/guest/reservation/${reservation.code}/request`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'towels', detail: 'Dos toallas extra' }) });
+      assert.equal(r.status, 201);
+      const list = await api(`/api/ops/guest-requests?propertyId=${propertyId}`);
+      assert.equal(list.status, 200);
+      const mine = list.data.find(x => x.detail === 'Dos toallas extra');
+      assert.ok(mine, 'el staff ve la solicitud');
+      assert.equal(mine.type, 'towels');
+      guestReqId = mine.id;
+    });
+
+    await test('el staff atiende la solicitud del huésped', async () => {
+      const upd = await api(`/api/ops/guest-requests/${guestReqId}`, { method: 'PATCH', body: { status: 'done' } });
+      assert.equal(upd.status, 200);
+      assert.equal(upd.data.status, 'done');
+      assert.ok(upd.data.resolvedAt);
+    });
+
+    await test('el huésped genera link de pago del saldo desde el portal', async () => {
+      const r = await fetch(`${BASE}/api/public/guest/reservation/${reservation.code}/pay`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      const d = await r.json();
+      assert.equal(r.status, 200);
+      assert.ok(d.paymentUrl && d.amount > 0, 'devuelve URL de pago y saldo');
+    });
+
     // ===== Flujo 48.2/48.3: check-in, folio, check-out =====
     await test('check-in asigna habitación y abre folio', async () => {
       const { status, data } = await api(`/api/reservations/${reservation.id}/checkin`, { method: 'POST', body: {} });

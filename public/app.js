@@ -181,6 +181,7 @@
     ['booking', '➕ Nueva reserva'],
     ['housekeeping', '🧹 Housekeeping'],
     ['maintenance', '🔧 Mantenimiento'],
+    ['guestrequests', '🛎️ Solicitudes'],
     ['sep', 'Comercial'],
     ['inbox', '💬 Inbox / WhatsApp'],
     ['crm', '👥 CRM'],
@@ -716,6 +717,32 @@
           ${t.status === 'done' ? `<button class="btn small secondary" onclick="_hkStatus('${t.id}','inspected')">Inspeccionar</button>` : ''}</td>
       </tr>`).join('')}
     </table>${tasks.length ? '' : '<p class="muted">Sin tareas. Se generan automáticamente en cada check-out.</p>'}</div>`;
+  }
+
+  async function viewGuestRequests() {
+    const reqs = await get(`/ops/guest-requests?${pid()}`);
+    const typeLabel = { cleaning: '🧹 Limpieza', towels: '🧺 Toallas', amenities: '🧴 Amenidades', room_service: '🍽️ Room service', maintenance: '🔧 Falla', checkout: '🚪 Check-out', other: '📌 Otro' };
+    const stBadge = { pending: 'pending', in_progress: 'in_progress', done: 'done', cancelled: 'cancelled' };
+    const stLabel = { pending: 'Recibida', in_progress: 'En proceso', done: 'Atendida', cancelled: 'Cancelada' };
+    window._grSet = async (id, status) => { try { await api(`/ops/guest-requests/${id}`, { method: 'PATCH', body: { status } }); toast('Actualizada'); render(); } catch (e) { toast(e.message, true); } };
+    const pend = reqs.filter(r => r.status === 'pending' || r.status === 'in_progress');
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Pendientes</div><div class="value" style="color:${pend.length ? 'var(--yellow)' : 'inherit'}">${pend.length}</div></div>
+        <div class="kpi"><div class="label">Atendidas hoy</div><div class="value">${reqs.filter(r => r.status === 'done' && String(r.resolvedAt || '').slice(0, 10) === new Date().toISOString().slice(0, 10)).length}</div></div>
+        <div class="kpi"><div class="label">Total</div><div class="value">${reqs.length}</div></div>
+        <div class="kpi"><div class="label">Fallas reportadas</div><div class="value" style="color:${reqs.some(r => r.type === 'maintenance' && r.status !== 'done') ? 'var(--red)' : 'inherit'}">${reqs.filter(r => r.type === 'maintenance' && r.status !== 'done').length}</div></div>
+      </div>
+      <div class="card mt"><h3>Solicitudes desde el portal del huésped</h3>
+        ${reqs.length ? `<table><tr><th>Hab</th><th>Huésped</th><th>Tipo</th><th>Detalle</th><th>Recibida</th><th>Estado</th><th></th></tr>
+        ${reqs.map(r => `<tr><td><b>${esc(r.roomNumber || '—')}</b></td><td>${esc(r.guestName)}</td><td>${typeLabel[r.type] || esc(r.type)}</td>
+          <td class="muted" style="font-size:12px">${esc(r.detail || '')}</td><td class="muted" style="font-size:12px">${dt(r.createdAt)}</td>
+          <td>${sb(stBadge[r.status] || 'pending')} ${stLabel[r.status] || esc(r.status)}</td>
+          <td>${r.status === 'pending' ? `<button class="btn small ghost" onclick="_grSet('${r.id}','in_progress')">Tomar</button>` : ''}
+              ${r.status === 'in_progress' ? `<button class="btn small" onclick="_grSet('${r.id}','done')">Completar</button>` : ''}
+              ${['pending', 'in_progress'].includes(r.status) ? `<button class="btn small ghost" onclick="_grSet('${r.id}','cancelled')">✕</button>` : ''}</td>
+        </tr>`).join('')}</table>` : '<p class="muted">Sin solicitudes. Aparecen aquí cuando un huésped las envía desde su portal.</p>'}
+      </div>`;
   }
 
   async function viewMaintenance() {
@@ -2723,6 +2750,7 @@
     events: ['Eventos, salones y montajes', viewEvents],
     housekeeping: ['Housekeeping', viewHousekeeping],
     maintenance: ['Mantenimiento', viewMaintenance],
+    guestrequests: ['Solicitudes de huéspedes', viewGuestRequests],
     payments: ['Pagos y links', viewPayments],
     invoices: ['Facturación electrónica (Dataico)', viewInvoices],
     copilot: ['Copiloto interno', viewCopilot],

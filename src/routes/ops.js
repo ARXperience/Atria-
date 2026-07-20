@@ -9,6 +9,25 @@ import { emitEvent } from '../lib/events.js';
 
 export const opsRouter = Router();
 
+// ---- Solicitudes de huéspedes (portal §14) ----
+opsRouter.get('/guest-requests', requirePermission('reservations.view'), async (req, res) => {
+  const { propertyId, status } = req.query;
+  if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const where = { propertyId };
+  if (status) where.status = { in: String(status).split(',') };
+  res.json(await prisma.guestRequest.findMany({ where, orderBy: [{ status: 'asc' }, { createdAt: 'desc' }], take: 200 }));
+});
+
+opsRouter.patch('/guest-requests/:id', requirePermission('reservations.view'), async (req, res) => {
+  const gr = await prisma.guestRequest.findUnique({ where: { id: req.params.id } });
+  if (!gr || !propertyScope(req, gr.propertyId)) return res.status(404).json({ error: 'Solicitud no encontrada' });
+  const status = req.body?.status;
+  if (!['pending', 'in_progress', 'done', 'cancelled'].includes(status)) return badRequest(res, 'estado inválido');
+  const updated = await prisma.guestRequest.update({ where: { id: gr.id }, data: { status, resolvedBy: ['done', 'cancelled'].includes(status) ? req.user.name : null, resolvedAt: ['done', 'cancelled'].includes(status) ? new Date() : null } });
+  await audit({ propertyId: gr.propertyId, user: req.user, action: `guest_request.${status}`, entity: 'GuestRequest', entityId: gr.id });
+  res.json(updated);
+});
+
 // ---- Housekeeping ----
 opsRouter.get('/housekeeping/tasks', requirePermission('housekeeping.view'), async (req, res) => {
   const { propertyId, status } = req.query;

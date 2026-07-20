@@ -6,7 +6,7 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="login-wrap"><div class="login-card" id="box" style="width:440px">
+  <div class="login-wrap"><div class="login-card" id="box" style="width:460px;max-width:94vw">
     <div class="brand">ATR<b>IA</b></div>
     <div class="brand-sub">PORTAL DEL HUÉSPED</div>
     <p class="muted" style="text-align:center">Cargando reserva…</p>
@@ -16,11 +16,23 @@
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const cop = n => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
     const STATUS = { tentative: 'Pendiente de pago', confirmed: 'Confirmada ✅', checked_in: 'En estadía 🏨', checked_out: 'Finalizada', cancelled: 'Cancelada', expired: 'Vencida' };
+    const base = `/api/public/guest/reservation/${encodeURIComponent(code)}`;
+    let toastT;
+    function toast(msg, bad) { let t = document.getElementById('t'); if (!t) { t = document.createElement('div'); t.id = 't'; t.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);padding:12px 20px;border-radius:10px;color:#fff;z-index:99;font-size:14px'; document.body.appendChild(t); } t.style.background = bad ? '#b3323c' : '#2a7d4f'; t.textContent = msg; t.style.opacity = 1; clearTimeout(toastT); toastT = setTimeout(() => t.style.opacity = 0, 3000); }
+    async function post(path, body) { const res = await fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) }); const d = await res.json().catch(() => ({})); if (!res.ok) throw new Error(d.error || 'Error'); return d; }
 
-    fetch(`/api/public/guest/reservation/${encodeURIComponent(code)}`).then(async res => {
+    async function load() {
       const box = document.getElementById('box');
-      if (!res.ok) { box.innerHTML += '<p style="color:var(--red);text-align:center">Reserva no encontrada.</p>'; return; }
+      const res = await fetch(base);
+      if (!res.ok) { box.innerHTML = '<div class="brand">ATR<b>IA</b></div><p style="color:var(--red);text-align:center">Reserva no encontrada.</p>'; return; }
       const r = await res.json();
+      const requests = await fetch(base + '/requests').then(x => x.ok ? x.json() : []).catch(() => []);
+      const canRequest = ['confirmed', 'checked_in'].includes(r.status);
+      const canPre = ['tentative', 'confirmed'].includes(r.status) && !r.precheckinDone;
+      const reqLabel = { cleaning: 'Limpieza', towels: 'Toallas', amenities: 'Amenidades', room_service: 'Room service', maintenance: 'Mantenimiento', checkout: 'Check-out', other: 'Otro' };
+      const stLabel = { pending: 'Recibida', in_progress: 'En proceso', done: 'Atendida', cancelled: 'Cancelada' };
+
+      box.style.width = '520px';
       box.innerHTML = `
         <div class="brand">ATR<b>IA</b></div><div class="brand-sub">PORTAL DEL HUÉSPED</div>
         <div class="card">
@@ -31,14 +43,67 @@
             <tr><td class="muted">Huésped</td><td>${esc(r.guestName)}</td></tr>
             <tr><td class="muted">Llegada</td><td>${esc(r.checkIn)} desde ${esc(r.checkInTime)}</td></tr>
             <tr><td class="muted">Salida</td><td>${esc(r.checkOut)} hasta ${esc(r.checkOutTime)}</td></tr>
-            <tr><td class="muted">Noches / Personas</td><td>${r.nights} noche(s) · ${r.adults + r.children} persona(s)</td></tr>
-            <tr><td class="muted">Total</td><td>${cop(r.total)}</td></tr>
-            <tr><td class="muted">Pagado</td><td>${cop(r.paid)}</td></tr>
-            <tr><td class="muted">Saldo</td><td><b>${cop(r.balance)}</b></td></tr>
+            <tr><td class="muted">Total / Saldo</td><td>${cop(r.total)} · <b>${cop(r.balance)}</b></td></tr>
           </table>
-          ${r.pendingLink && r.balance > 0 ? `<a href="/pay/${r.pendingLink}"><button class="btn mt" style="width:100%">Pagar ahora</button></a>` : ''}
-        </div>`;
-    });
+          ${r.balance > 0 ? `<button class="btn mt" style="width:100%" onclick="payBalance()">Pagar saldo ${cop(r.balance)}</button>` : ''}
+          ${r.status === 'checked_in' ? `<button class="btn secondary mt" style="width:100%" onclick="expressCheckout()">Check-out express</button>` : ''}
+        </div>
+
+        ${canPre ? `<div class="card mt">
+          <h3>🛂 Check-in en línea</h3>
+          <p class="muted" style="font-size:13px">Completa tu registro antes de llegar y agiliza tu ingreso.</p>
+          <label>Tipo de documento</label>
+          <select id="pDocType"><option value="CC">Cédula</option><option value="CE">Cédula extranjería</option><option value="PASSPORT">Pasaporte</option></select>
+          <label class="mt">Número de documento</label><input id="pDoc" value="${esc(r.guestDoc || '')}">
+          <label class="mt">Nacionalidad</label><input id="pNat" value="${esc(r.guestNationality || 'CO')}">
+          <label class="mt">Correo</label><input id="pEmail" type="email" value="${esc(r.guestEmail || '')}">
+          <label class="mt">Teléfono</label><input id="pPhone" value="${esc(r.guestPhone || '')}">
+          <label class="mt">Hora estimada de llegada</label><input id="pArr" type="time">
+          <label class="mt">Acompañantes (nombres separados por coma)</label><input id="pComp" placeholder="opcional">
+          <label class="mt" style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="pPol" style="width:auto"> Acepto las políticas del hotel y el tratamiento de mis datos.</label>
+          <button class="btn mt" style="width:100%" onclick="submitPre()">Completar check-in en línea</button>
+        </div>` : r.precheckinDone ? `<div class="card mt"><h3>✅ Check-in en línea completo</h3><p class="muted">Tu registro está listo${r.arrivalTime ? ` · llegada estimada ${esc(r.arrivalTime)}` : ''}. Te esperamos.</p></div>` : ''}
+
+        ${canRequest ? `<div class="card mt">
+          <h3>🛎️ Solicitar un servicio</h3>
+          <select id="rType"><option value="towels">Toallas</option><option value="cleaning">Limpieza de habitación</option><option value="amenities">Amenidades</option><option value="room_service">Room service</option><option value="maintenance">Reportar una falla</option><option value="other">Otro</option></select>
+          <input class="mt" id="rDetail" placeholder="Detalle (opcional)">
+          <button class="btn mt" style="width:100%" onclick="sendRequest()">Enviar solicitud</button>
+          ${requests.length ? `<table class="mt">${requests.map(q => `<tr><td>${esc(reqLabel[q.type] || q.type)}</td><td class="muted" style="text-align:right;font-size:12px">${esc(stLabel[q.status] || q.status)}</td></tr>`).join('')}</table>` : ''}
+        </div>` : ''}
+
+        ${r.status === 'checked_out' ? `<div class="card mt">
+          <h3>⭐ ¿Cómo estuvo tu estadía?</h3>
+          <select id="rvRating"><option value="5">★★★★★ Excelente</option><option value="4">★★★★ Buena</option><option value="3">★★★ Regular</option><option value="2">★★ Mala</option><option value="1">★ Muy mala</option></select>
+          <textarea class="mt" id="rvComment" rows="3" placeholder="Cuéntanos (opcional)"></textarea>
+          <button class="btn mt" style="width:100%" onclick="sendReview()">Enviar reseña</button>
+        </div>` : ''}`;
+    }
+
+    async function submitPre() {
+      if (!document.getElementById('pPol').checked) return toast('Acepta las políticas para continuar', true);
+      try {
+        await post('/precheckin', { documentType: pDocType.value, documentNumber: pDoc.value, nationality: pNat.value, email: pEmail.value, phone: pPhone.value, arrivalTime: pArr.value, companions: pComp.value ? pComp.value.split(',').map(s => s.trim()).filter(Boolean) : [], acceptPolicies: true });
+        toast('¡Check-in en línea completado!'); load();
+      } catch (e) { toast(e.message, true); }
+    }
+    async function sendRequest() {
+      try { await post('/request', { type: rType.value, detail: rDetail.value }); toast('Solicitud enviada al hotel'); load(); }
+      catch (e) { toast(e.message, true); }
+    }
+    async function payBalance() {
+      try { const d = await post('/pay', {}); location.href = d.paymentUrl; }
+      catch (e) { toast(e.message, true); }
+    }
+    async function expressCheckout() {
+      try { const d = await post('/express-checkout', {}); if (d.needsPayment) { toast('Tienes saldo pendiente, primero paga.', true); } else { toast('Check-out express solicitado. ¡Buen viaje!'); load(); } }
+      catch (e) { toast(e.message, true); }
+    }
+    async function sendReview() {
+      try { await post('/review', { rating: +rvRating.value, comment: rvComment.value }); toast('¡Gracias por tu reseña!'); }
+      catch (e) { toast(e.message, true); }
+    }
+    load();
   </script>
 </body>
 </html>
