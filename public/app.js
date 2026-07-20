@@ -216,6 +216,7 @@
     ['fontur', '🏝️ FONTUR parafiscal'],
     ['documents', '📁 Documentos'],
     ['audit', '🔍 Auditoría'],
+    ['notifchannels', '🔔 Notificaciones'],
     ['integrations', '🔌 Integraciones'],
     ['automations', '⚡ Automatizaciones'],
     ['onboarding', '🚀 Onboarding & Importar'],
@@ -2689,8 +2690,33 @@
   }
 
   async function viewAudit() {
-    const logs = await get(`/audit-logs?${pid()}`);
-    return `<div class="card"><table>
+    const f = state._auditFilter || {};
+    const qs = () => {
+      let q = pid();
+      if (f.actor) q += `&actor=${f.actor}`;
+      if (f.action) q += `&action=${encodeURIComponent(f.action)}`;
+      if (f.from) q += `&from=${f.from}`;
+      if (f.to) q += `&to=${f.to}`;
+      return q;
+    };
+    const logs = await get(`/audit-logs?${qs()}`);
+    window._auditApply = () => {
+      state._auditFilter = { actor: $('#auActor').value, action: $('#auAction').value.trim(), from: $('#auFrom').value, to: $('#auTo').value };
+      render();
+    };
+    window._auditExport = () => _dl(`/audit-logs/export?${qs()}`, `auditoria-${new Date().toISOString().slice(0, 10)}.csv`);
+    return `
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap">
+        <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div><label>Actor</label><select id="auActor"><option value="">Todos</option><option value="human" ${f.actor === 'human' ? 'selected' : ''}>Humano</option><option value="ai" ${f.actor === 'ai' ? 'selected' : ''}>IA</option><option value="system" ${f.actor === 'system' ? 'selected' : ''}>Sistema</option></select></div>
+          <div><label>Acción contiene</label><input id="auAction" value="${esc(f.action || '')}" placeholder="p.ej. approval"></div>
+          <div><label>Desde</label><input id="auFrom" type="date" value="${esc(f.from || '')}"></div>
+          <div><label>Hasta</label><input id="auTo" type="date" value="${esc(f.to || '')}"></div>
+          <button class="btn secondary fit" onclick="_auditApply()">Filtrar</button>
+        </div>
+        <button class="btn fit" onclick="_auditExport()">⬇️ Exportar CSV</button>
+      </div></div>
+      <div class="card"><table>
       <tr><th>Fecha</th><th>Actor</th><th>Usuario</th><th>Acción</th><th>Entidad</th><th>Detalle</th></tr>
       ${logs.map(l => `<tr>
         <td>${dt(l.createdAt)}</td>
@@ -2699,7 +2725,7 @@
         <td class="muted">${esc(l.entity || '')}</td>
         <td class="muted" style="font-size:11.5px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.after || l.reason || '')}</td>
       </tr>`).join('')}
-    </table></div>`;
+    </table>${logs.length ? '' : '<p class="muted">Sin registros para el filtro.</p>'}</div>`;
   }
 
   async function viewIntegrations() {
@@ -2890,6 +2916,48 @@
       </div>
       <div class="mt">
         ${importCard('employees', '👔 Importar empleados', 'nombre, documento, cargo, area, salario, riesgo, ingreso, eps, afp, arl, ccf', 'nombre,documento,cargo,area,salario,ingreso\nLaura Ruiz,1012345678,Recepcionista,recepción,1800000,2026-01-15')}
+      </div>`;
+  }
+
+  async function viewNotifChannels() {
+    const { channels, deliveries } = await get(`/notification-channels?${pid()}`);
+    const typeLabel = { email: '✉️ Email', whatsapp: '💬 WhatsApp', webhook: '🔗 Webhook' };
+    const sevBadge = { info: badge('info', 'gray'), warning: badge('warning', 'yellow'), critical: badge('critical', 'red') };
+    window._ncAdd = async () => {
+      try {
+        await api('/notification-channels', { method: 'POST', body: {
+          propertyId: state.propertyId, type: $('#ncType').value, target: $('#ncTarget').value.trim(),
+          label: $('#ncLabel').value.trim() || null, minSeverity: $('#ncSev').value,
+        } });
+        toast('Canal creado'); render();
+      } catch (err) { toast(err.message, true); }
+    };
+    window._ncToggle = async (id, enabled) => { try { await api(`/notification-channels/${id}`, { method: 'PATCH', body: { enabled } }); toast(enabled ? 'Activado' : 'Desactivado'); render(); } catch (e) { toast(e.message, true); } };
+    window._ncTest = async id => { try { await api(`/notification-channels/${id}/test`, { method: 'POST' }); toast('Notificación de prueba enviada'); render(); } catch (e) { toast(e.message, true); } };
+    window._ncDel = async id => { if (!confirm('¿Eliminar canal?')) return; try { await api(`/notification-channels/${id}`, { method: 'DELETE' }); toast('Eliminado'); render(); } catch (e) { toast(e.message, true); } };
+    return `
+      <div class="card"><h3>🔔 Canales de notificación</h3>
+        <p class="muted" style="font-size:12.5px">Reenvía las alertas internas a email, WhatsApp o un webhook según su severidad mínima. Los envíos quedan registrados abajo.</p>
+        <div class="row" style="align-items:flex-end;gap:10px">
+          <div><label>Tipo</label><select id="ncType"><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="webhook">Webhook</option></select></div>
+          <div style="flex:2"><label>Destino *</label><input id="ncTarget" placeholder="alertas@hotel.co / 573001234567 / https://..."></div>
+          <div><label>Etiqueta</label><input id="ncLabel" placeholder="Gerencia"></div>
+          <div><label>Severidad mínima</label><select id="ncSev"><option value="info">Info</option><option value="warning" selected>Warning</option><option value="critical">Critical</option></select></div>
+          <button class="btn fit" onclick="_ncAdd()">Agregar</button>
+        </div>
+        ${channels.length ? `<table class="mt"><tr><th>Canal</th><th>Destino</th><th>Severidad mín.</th><th>Estado</th><th></th></tr>
+          ${channels.map(c => `<tr><td>${typeLabel[c.type] || esc(c.type)}${c.label ? ` · ${esc(c.label)}` : ''}</td>
+            <td class="muted" style="font-size:12px">${esc(c.target)}</td><td>${sevBadge[c.minSeverity] || esc(c.minSeverity)}</td>
+            <td>${badge(c.enabled ? 'Activo' : 'Inactivo', c.enabled ? 'green' : 'gray')}</td>
+            <td><button class="btn small secondary" onclick="_ncTest('${c.id}')">Probar</button>
+                <button class="btn small ghost" onclick="_ncToggle('${c.id}',${!c.enabled})">${c.enabled ? 'Pausar' : 'Activar'}</button>
+                <button class="btn small ghost" onclick="_ncDel('${c.id}')">✕</button></td></tr>`).join('')}</table>` : '<p class="muted mt">Sin canales configurados.</p>'}
+      </div>
+      <div class="card mt"><h3>Últimos reenvíos</h3>
+        ${deliveries.length ? `<table><tr><th>Fecha</th><th>Canal</th><th>Destino</th><th>Alerta</th><th>Severidad</th><th>Estado</th></tr>
+          ${deliveries.map(d => `<tr><td class="muted" style="font-size:12px">${dt(d.createdAt)}</td><td>${typeLabel[d.channelType] || esc(d.channelType)}</td>
+            <td class="muted" style="font-size:12px">${esc(d.target)}</td><td>${esc(d.title)}</td><td>${sevBadge[d.severity] || esc(d.severity)}</td>
+            <td>${badge(d.status, d.status === 'sent' ? 'green' : 'red')}</td></tr>`).join('')}</table>` : '<p class="muted">Aún no se han reenviado alertas.</p>'}
       </div>`;
   }
 
@@ -3196,6 +3264,7 @@
     integrations: ['Centro de integraciones', viewIntegrations],
     automations: ['Automatizaciones — reglas no-code', viewAutomations],
     onboarding: ['Onboarding e importación de datos', viewOnboarding],
+    notifchannels: ['Canales de notificación', viewNotifChannels],
     datagov: ['Calidad y gobierno de datos', viewDataGovernance],
     subscription: ['Mi suscripción y consumo', viewSubscription],
     saasadmin: ['Consola del superadministrador SaaS', viewSaasAdmin],

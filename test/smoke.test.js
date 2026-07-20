@@ -590,6 +590,70 @@ async function main() {
       assert.ok(data.some(l => l.action === 'reservation.confirmed'));
     });
 
+    await test('exportación de auditoría a CSV (§42)', async () => {
+      const res = await fetch(`${BASE}/api/audit-logs/export?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${token}` } });
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-type') || '', /text\/csv/);
+      assert.match(res.headers.get('content-disposition') || '', /attachment; filename="auditoria-/);
+      const text = await res.text();
+      const lines = text.replace(/^﻿/, '').trim().split('\r\n');
+      assert.equal(lines[0], 'fecha,actor,usuario,accion,entidad,entidadId,antes,despues,motivo,ip');
+      assert.ok(lines.length > 1, 'incluye filas de registros');
+    });
+
+    await test('exportación de auditoría filtra por actor', async () => {
+      const res = await fetch(`${BASE}/api/audit-logs/export?propertyId=${propertyId}&actor=ai`, { headers: { authorization: `Bearer ${token}` } });
+      const text = await res.text();
+      const rows = text.replace(/^﻿/, '').trim().split('\r\n').slice(1);
+      assert.ok(rows.length >= 1, 'hay filas de IA');
+      assert.ok(rows.every(r => r.split(',')[1] === 'ai'), 'todas las filas son del actor IA');
+    });
+
+    // ===== Canales de notificación configurables (§44) =====
+    let notifChannelId;
+    await test('crear un canal de notificación por email', async () => {
+      const { status, data } = await api('/api/notification-channels', { method: 'POST', body: { propertyId, type: 'email', target: 'alertas@hotel.co', label: 'Gerencia', minSeverity: 'warning' } });
+      assert.equal(status, 201);
+      assert.equal(data.type, 'email');
+      assert.equal(data.enabled, true);
+      notifChannelId = data.id;
+    });
+
+    await test('validaciones de canal (email y webhook)', async () => {
+      const badEmail = await api('/api/notification-channels', { method: 'POST', body: { propertyId, type: 'email', target: 'no-es-correo' } });
+      assert.equal(badEmail.status, 400);
+      const badHook = await api('/api/notification-channels', { method: 'POST', body: { propertyId, type: 'webhook', target: 'ftp://x' } });
+      assert.equal(badHook.status, 400);
+    });
+
+    await test('una alerta warning se reenvía al canal; una info no', async () => {
+      const { notify } = await import('../src/services/notifications.js');
+      await notify({ propertyId, audienceRole: 'MANAGER', title: 'Prueba warning', severity: 'warning' });
+      await notify({ propertyId, audienceRole: 'MANAGER', title: 'Prueba info', severity: 'info' });
+      await settle(300);
+      const { data } = await api(`/api/notification-channels?propertyId=${propertyId}`);
+      const forChannel = data.deliveries.filter(d => d.channelId === notifChannelId);
+      assert.ok(forChannel.some(d => d.title === 'Prueba warning'), 'la warning se reenvió');
+      assert.ok(!forChannel.some(d => d.title === 'Prueba info'), 'la info NO se reenvió (bajo la severidad mínima)');
+    });
+
+    await test('un canal en pausa no recibe reenvíos', async () => {
+      await api(`/api/notification-channels/${notifChannelId}`, { method: 'PATCH', body: { enabled: false } });
+      const { notify } = await import('../src/services/notifications.js');
+      await notify({ propertyId, audienceRole: 'MANAGER', title: 'Warning en pausa', severity: 'critical' });
+      await settle(300);
+      const { data } = await api(`/api/notification-channels?propertyId=${propertyId}`);
+      assert.ok(!data.deliveries.some(d => d.title === 'Warning en pausa'), 'sin reenvío estando en pausa');
+    });
+
+    await test('prueba manual de canal registra una entrega', async () => {
+      await api(`/api/notification-channels/${notifChannelId}`, { method: 'PATCH', body: { enabled: true } });
+      const t = await api(`/api/notification-channels/${notifChannelId}/test`, { method: 'POST' });
+      assert.equal(t.status, 200);
+      assert.equal(t.data.status, 'sent');
+      assert.match(t.data.title, /prueba/i);
+    });
+
     await test('rol housekeeping no puede ver pagos (permisos backend)', async () => {
       const { data: login } = await api('/api/auth/login', { method: 'POST', body: { email: 'housekeeping@atria.co', password: 'atria2026' } });
       const res = await fetch(`${BASE}/api/payments?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${login.token}` } });

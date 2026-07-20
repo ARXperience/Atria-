@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
 import { decideApproval } from '../services/approvals.js';
+import { createChannel, updateChannel, deleteChannel, listChannels, testChannel, listDeliveries } from '../services/notifications.js';
 import { badRequest, dayStr, addDays } from '../lib/util.js';
 
 export const miscRouter = Router();
@@ -37,6 +38,32 @@ miscRouter.get('/audit-logs', requirePermission('audit.view'), async (req, res) 
   res.json(await prisma.auditLog.findMany({ where, orderBy: { createdAt: 'desc' }, take: Math.min(+take, 500) }));
 });
 
+// Exportación de auditoría a CSV para cumplimiento (§42).
+miscRouter.get('/audit-logs/export', requirePermission('audit.view'), async (req, res) => {
+  const { propertyId, entity, action, actor, from, to } = req.query;
+  const where = { companyId: req.user.companyId };
+  if (propertyId) {
+    if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+    where.OR = [{ propertyId }, { propertyId: null }];
+    delete where.companyId;
+  }
+  if (entity) where.entity = entity;
+  if (action) where.action = { contains: action };
+  if (actor) where.actor = actor;
+  if (from || to) where.createdAt = { ...(from ? { gte: new Date(from) } : {}), ...(to ? { lte: new Date(to) } : {}) };
+  const logs = await prisma.auditLog.findMany({ where, orderBy: { createdAt: 'desc' }, take: 50000 });
+  const cell = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = ['fecha', 'actor', 'usuario', 'accion', 'entidad', 'entidadId', 'antes', 'despues', 'motivo', 'ip'];
+  const rows = logs.map((l) => [l.createdAt.toISOString(), l.actor, l.userName, l.action, l.entity, l.entityId, l.before, l.after, l.reason, l.ip].map(cell).join(','));
+  const csv = '﻿' + [header.join(','), ...rows].join('\r\n'); // BOM para Excel
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="auditoria-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send(csv);
+});
+
 // ---- Notificaciones (sección 44) ----
 miscRouter.get('/notifications', requirePermission('notifications.view'), async (req, res) => {
   const { propertyId, unread } = req.query;
@@ -50,6 +77,42 @@ miscRouter.post('/notifications/:id/read', requirePermission('notifications.view
   const n = await prisma.notification.findUnique({ where: { id: req.params.id } });
   if (!n || !propertyScope(req, n.propertyId)) return res.status(404).json({ error: 'No encontrada' });
   res.json(await prisma.notification.update({ where: { id: n.id }, data: { readAt: new Date() } }));
+});
+
+// ---- Canales de notificación configurables (§44) ----
+miscRouter.get('/notification-channels', requirePermission('notifications.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const [channels, deliveries] = await Promise.all([
+    listChannels(req.query.propertyId),
+    listDeliveries(req.query.propertyId),
+  ]);
+  res.json({ channels, deliveries });
+});
+
+miscRouter.post('/notification-channels', requirePermission('notifications.manage'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try { res.status(201).json(await createChannel({ ...req.body, user: req.user })); }
+  catch (err) { badRequest(res, err.message); }
+});
+
+miscRouter.patch('/notification-channels/:id', requirePermission('notifications.manage'), async (req, res) => {
+  const ch = await prisma.notificationChannel.findUnique({ where: { id: req.params.id } });
+  if (!ch || !propertyScope(req, ch.propertyId)) return res.status(404).json({ error: 'Canal no encontrado' });
+  try { res.json(await updateChannel(ch.id, { ...req.body, user: req.user })); }
+  catch (err) { badRequest(res, err.message); }
+});
+
+miscRouter.delete('/notification-channels/:id', requirePermission('notifications.manage'), async (req, res) => {
+  const ch = await prisma.notificationChannel.findUnique({ where: { id: req.params.id } });
+  if (!ch || !propertyScope(req, ch.propertyId)) return res.status(404).json({ error: 'Canal no encontrado' });
+  res.json(await deleteChannel(ch.id, { user: req.user }));
+});
+
+miscRouter.post('/notification-channels/:id/test', requirePermission('notifications.manage'), async (req, res) => {
+  const ch = await prisma.notificationChannel.findUnique({ where: { id: req.params.id } });
+  if (!ch || !propertyScope(req, ch.propertyId)) return res.status(404).json({ error: 'Canal no encontrado' });
+  try { res.json(await testChannel(ch.id, { user: req.user })); }
+  catch (err) { badRequest(res, err.message); }
 });
 
 // ---- Dashboard gerencial (sección 38): ocupación, ADR, RevPAR, llegadas ----

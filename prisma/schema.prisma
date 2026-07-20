@@ -233,6 +233,38 @@ model Notification {
   @@index([propertyId, readAt])
 }
 
+// Canales de notificación configurables (§44): reenvían las alertas internas a
+// email/WhatsApp/webhook según severidad mínima.
+model NotificationChannel {
+  id          String   @id @default(cuid())
+  propertyId  String
+  type        String   // email | whatsapp | webhook
+  target      String   // dirección de correo, número o URL
+  label       String?
+  minSeverity String   @default("warning") // info | warning | critical
+  audienceRole String? // si se fija, solo reenvía alertas de ese rol
+  enabled     Boolean  @default(true)
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  @@index([propertyId, enabled])
+}
+
+model NotificationDelivery {
+  id         String   @id @default(cuid())
+  propertyId String
+  channelId  String
+  channelType String
+  target     String
+  title      String
+  severity   String
+  status     String   @default("sent") // sent | failed | skipped
+  detail     String?
+  createdAt  DateTime @default(now())
+
+  @@index([propertyId, createdAt])
+}
+
 // ===================== Atria PMS =====================
 
 model RoomType {
