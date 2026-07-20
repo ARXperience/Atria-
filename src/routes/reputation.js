@@ -14,6 +14,13 @@ reputationRouter.get('/overview', requirePermission('reputation.view'), async (r
   res.json(await reputationOverview(req.query.propertyId));
 });
 
+// Sentimiento por tema con tendencia y alertas tempranas (§37/§41)
+reputationRouter.get('/sentiment', requirePermission('reputation.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const { topicSentiment } = await import('../services/ai/sentiment.js');
+  res.json(await topicSentiment(req.query.propertyId, { windowDays: +req.query.windowDays || 90 }));
+});
+
 // ---- Encuestas y quejas (§37) ----
 reputationRouter.get('/surveys', requirePermission('reputation.view'), async (req, res) => {
   if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });

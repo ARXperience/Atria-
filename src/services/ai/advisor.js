@@ -48,6 +48,14 @@ async function reputationSignals(propertyId) {
     if (rep.pending > 0) out.push({ area: 'reputation', permission: 'reputation.view', severity: rep.pending >= 3 ? 'warning' : 'info', title: `${rep.pending} reseña(s) sin responder`, detail: `Responder reseñas mejora la reputación y el posicionamiento. Calificación media ${rep.avg || '—'}/5, NPS ${rep.nps}.`, action: 'Abrir Reputación y responder (la IA sugiere el borrador).', metric: rep.pending });
     if (rep.count >= 3 && rep.avg && rep.avg < 3.5) out.push({ area: 'reputation', permission: 'reputation.view', severity: 'warning', title: `Calificación media baja (${rep.avg}/5)`, detail: `La percepción de los huéspedes está por debajo del objetivo. Revisa quejas con causa raíz.`, action: 'Revisar quejas abiertas y acciones correctivas.', metric: rep.avg });
   } catch { /* */ }
+  // Alerta temprana por tema (antes de que caiga la calificación).
+  try {
+    const { topicSentiment } = await import('./sentiment.js');
+    const { alerts } = await topicSentiment(propertyId);
+    for (const a of alerts.slice(0, 2)) {
+      out.push({ area: 'reputation', permission: 'reputation.view', severity: a.trend === 'worsening' ? 'warning' : 'info', title: `Tema "${a.topic}" ${a.trend === 'worsening' ? 'empeorando' : 'con quejas'} (${a.negative} negativas)`, detail: `Se detecta sentimiento negativo en "${a.topic}"${a.sample ? `: "${a.sample}"` : ''}. Actúa antes de que impacte la calificación.`, action: `Revisar el tema "${a.topic}" con el equipo responsable.`, metric: a.score });
+    }
+  } catch { /* */ }
   return out;
 }
 

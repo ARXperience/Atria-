@@ -2002,7 +2002,14 @@
   }
 
   async function viewReputation() {
-    const [ov, sv] = await Promise.all([get(`/reputation/overview?${pid()}`), get(`/reputation/surveys?${pid()}`).catch(() => null)]);
+    const [ov, sv, sent] = await Promise.all([
+      get(`/reputation/overview?${pid()}`),
+      get(`/reputation/surveys?${pid()}`).catch(() => null),
+      get(`/reputation/sentiment?${pid()}`).catch(() => ({ topics: [], alerts: [] })),
+    ]);
+    const topicLabel = { limpieza: '🧹 Limpieza', servicio: '🛎️ Servicio', ruido: '🔊 Ruido', habitacion: '🛏️ Habitación', comida: '🍽️ Comida', wifi: '📶 WiFi', ubicacion: '📍 Ubicación', precio: '💲 Precio', mantenimiento: '🔧 Mantenimiento', recepcion: '🏨 Recepción', general: '💬 General' };
+    const trendPill = t => t === 'worsening' ? badge('empeorando ↓', 'red') : t === 'improving' ? badge('mejorando ↑', 'green') : badge('estable', 'gray');
+    const scoreColor = s => s > 0.2 ? 'var(--green)' : s < -0.2 ? 'var(--red)' : 'var(--yellow)';
     const catLabel = { limpieza: 'Limpieza', servicio: 'Servicio', ruido: 'Ruido', facturacion: 'Facturación', mantenimiento: 'Mantenimiento', otro: 'Otro' };
     const sevColor = { low: 'gray', medium: 'yellow', high: 'red' };
     window._cxResolve = async id => {
@@ -2035,6 +2042,18 @@
         <div class="kpi"><div class="label">Tasa de respuesta</div><div class="value"><span data-count="${ov.responseRate}" data-fmt="pct">0%</span></div></div>
         <div class="kpi"><div class="label">NPS aprox.</div><div class="value" style="color:${ov.nps >= 0 ? 'var(--green)' : 'var(--red)'}"><span data-count="${ov.nps}">0</span></div></div>
       </div>
+
+      ${sent.topics && sent.topics.length ? `<div class="card mt" ${sent.alerts.length ? 'style="border-left:3px solid var(--red)"' : ''}>
+        <h3>🧠 Sentimiento por tema <span class="muted" style="font-size:12px;font-weight:400">— detecta problemas antes de que caiga la calificación</span></h3>
+        ${sent.alerts.length ? `<p style="color:var(--red);font-size:12.5px;margin:6px 0">⚠️ Alerta temprana: ${sent.alerts.map(a => esc((topicLabel[a.topic] || a.topic))).join(', ')} requieren atención.</p>` : ''}
+        <table class="mt"><tr><th>Tema</th><th>Menciones</th><th>Positivas</th><th>Negativas</th><th>Sentimiento</th><th>Tendencia</th></tr>
+        ${sent.topics.map(t => `<tr>
+          <td><b>${topicLabel[t.topic] || esc(t.topic)}</b>${t.sample ? `<div class="muted" style="font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">"${esc(t.sample)}"</div>` : ''}</td>
+          <td>${t.mentions}</td><td style="color:var(--green)">${t.positive}</td><td style="color:var(--red)">${t.negative}</td>
+          <td style="color:${scoreColor(t.score)};font-weight:600">${t.score > 0 ? '+' : ''}${t.score}</td>
+          <td>${trendPill(t.trend)}</td>
+        </tr>`).join('')}</table>
+      </div>` : ''}
 
       <div class="grid cols-2 mt">
         <div class="card"><h3>Distribución de estrellas</h3>

@@ -2081,6 +2081,29 @@ async function main() {
       assert.ok(data.distribution[5] >= 1 && data.distribution[2] >= 1);
     });
 
+    // ===== Sentimiento por tema (§37/§41) =====
+    await test('el análisis de sentimiento clasifica reseñas por tema', async () => {
+      // Varias reseñas negativas sobre limpieza y ruido, una positiva de servicio.
+      await api('/api/reputation/reviews', { method: 'POST', body: { propertyId, guestName: 'A', source: 'google', rating: 2, comment: 'La habitación estaba sucia y con polvo.' } });
+      await api('/api/reputation/reviews', { method: 'POST', body: { propertyId, guestName: 'B', source: 'booking', rating: 1, comment: 'Mucho ruido toda la noche, no pude dormir.' } });
+      await api('/api/reputation/reviews', { method: 'POST', body: { propertyId, guestName: 'C', source: 'tripadvisor', rating: 2, comment: 'El aseo de la habitación fue deficiente.' } });
+      await api('/api/reputation/reviews', { method: 'POST', body: { propertyId, guestName: 'D', source: 'direct', rating: 5, comment: 'El servicio y la atención fueron excelentes y muy amables.' } });
+      const { status, data } = await api(`/api/reputation/sentiment?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      const limpieza = data.topics.find(t => t.topic === 'limpieza');
+      assert.ok(limpieza && limpieza.negative >= 2, 'detecta el tema limpieza como negativo');
+      const servicio = data.topics.find(t => t.topic === 'servicio');
+      assert.ok(servicio && servicio.positive >= 1, 'detecta servicio positivo');
+    });
+
+    await test('el sentimiento genera alertas tempranas por tema problemático', async () => {
+      const { data } = await api(`/api/reputation/sentiment?propertyId=${propertyId}`);
+      assert.ok(Array.isArray(data.alerts) && data.alerts.length >= 1, 'hay alerta temprana');
+      assert.ok(data.alerts.some(a => ['limpieza', 'ruido'].includes(a.topic)), 'la alerta apunta al tema negativo');
+      const a = data.alerts[0];
+      assert.ok(a.score <= 0, 'la alerta corresponde a sentimiento negativo');
+    });
+
     // ===== Eventos & corporativo (§33) =====
     let venueId, eventId;
     await test('los salones demo están sembrados', async () => {
