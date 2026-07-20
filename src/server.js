@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { config, assertProductionConfig } from './config.js';
 import { logger } from './lib/logger.js';
 import { securityHeaders, rateLimit } from './middleware/security.js';
+import { subscriptionGuard } from './middleware/saas.js';
+import { saasRouter } from './routes/saas.js';
 import { prisma } from './db.js';
 import { authRequired } from './middleware/auth.js';
 import { authRouter } from './routes/auth.js';
@@ -75,6 +77,10 @@ app.use('/api/public', publicRouter);
 // Rutas autenticadas
 app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth', authRouter);
+// Suscripción SaaS: /saas queda exento del guard (para poder ver/reactivar el plan).
+app.use('/api/saas', authRequired, saasRouter);
+// Guardia de suscripción (§55.1): bloquea empresas suspendidas en el resto de la API.
+app.use('/api', authRequired, subscriptionGuard);
 app.use('/api/admin', authRequired, adminRouter);
 app.use('/api/booking', authRequired, bookingRouter);
 app.use('/api/reservations', authRequired, reservationsRouter);

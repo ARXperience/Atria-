@@ -197,6 +197,8 @@
     ['integrations', '🔌 Integraciones'],
     ['automations', '⚡ Automatizaciones'],
     ['onboarding', '🚀 Onboarding & Importar'],
+    ['subscription', '💠 Suscripción'],
+    ['saasadmin', '🛡️ Consola SaaS'],
     ['settings', '⚙️ Configuración'],
   ];
 
@@ -212,7 +214,7 @@
           <div class="brand">ATR<b>IA</b></div>
           <div class="brand-sub">HOSPITALITY OS</div>
           <nav class="nav">
-            ${NAV.map(([id, label]) => id === 'sep'
+            ${NAV.filter(([id]) => id !== 'saasadmin' || state.user.isSuperAdmin).map(([id, label]) => id === 'sep'
               ? `<div class="sep">${label}</div>`
               : `<a href="#${id}" class="${state.view === id ? 'active' : ''}">${label}</a>`).join('')}
           </nav>
@@ -2423,6 +2425,59 @@
       </div>`;
   }
 
+  async function viewSubscription() {
+    const [sub, plans] = await Promise.all([get('/saas/subscription'), get('/saas/plans')]);
+    const stLabel = { trial: 'Prueba', active: 'Activa', suspended: 'Suspendida', cancelled: 'Cancelada' };
+    const stColor = { trial: 'yellow', active: 'green', suspended: 'red', cancelled: 'gray' };
+    const barColor = u => u.over ? 'var(--red)' : u.pct >= 80 ? 'var(--yellow)' : 'var(--green)';
+    return `
+      <div class="card"><h3>Mi plan</h3>
+        <div class="row" style="align-items:center;gap:14px">
+          <div style="flex:1"><div style="font-size:24px;font-weight:700;color:var(--accent)">${esc(sub.plan.name)}</div>
+            <div class="muted">${sub.plan.priceMonthly ? cop(sub.plan.priceMonthly) + ' / mes' : 'Sin costo'} · Estado: ${badge(stLabel[sub.status] || sub.status, stColor[sub.status] || 'gray')}</div>
+            ${sub.currentPeriodEnd ? `<div class="muted" style="font-size:12px">Renovación: ${day(sub.currentPeriodEnd)}</div>` : ''}</div>
+        </div>
+      </div>
+      <div class="card mt"><h3>Consumo del plan</h3>
+        ${sub.usage.map(u => `<div style="margin:10px 0">
+          <div class="row" style="justify-content:space-between"><span>${esc(u.label)}</span><span class="muted">${u.used} / ${u.limit}${u.over ? ' ⚠️' : ''}</span></div>
+          <div style="height:9px;background:var(--surface-2);border-radius:5px;overflow:hidden;margin-top:4px"><div style="height:100%;width:${u.pct}%;background:${barColor(u)}"></div></div>
+        </div>`).join('')}
+      </div>
+      <div class="card mt"><h3>Planes disponibles</h3>
+        <table><tr><th>Plan</th><th>Precio/mes</th><th>Usuarios</th><th>Sedes</th><th>Habitaciones</th><th>Msgs IA</th></tr>
+        ${plans.map(p => `<tr${p.code === sub.plan.code ? ' style="background:var(--accent-soft)"' : ''}><td><b>${esc(p.name)}</b>${p.code === sub.plan.code ? ' <span class="badge green" style="font-size:9px">actual</span>' : ''}</td><td>${p.priceMonthly ? cop(p.priceMonthly) : '—'}</td><td>${p.maxUsers}</td><td>${p.maxProperties}</td><td>${p.maxRooms}</td><td>${p.aiMessagesMonth.toLocaleString('es-CO')}</td></tr>`).join('')}</table>
+        <p class="muted mt" style="font-size:12px">Para cambiar de plan o activar add-ons, contacta a tu ejecutivo comercial. La facturación del software la gestiona el superadministrador.</p>
+      </div>`;
+  }
+
+  async function viewSaasAdmin() {
+    const companies = await get('/saas/companies');
+    const plans = await get('/saas/plans');
+    const stLabel = { trial: 'Prueba', active: 'Activa', suspended: 'Suspendida', cancelled: 'Cancelada' };
+    const stColor = { trial: 'yellow', active: 'green', suspended: 'red', cancelled: 'gray' };
+    window._saasPlan = async (id, code) => { try { await api(`/saas/companies/${id}/plan`, { method: 'POST', body: { planCode: code } }); toast('Plan actualizado'); render(); } catch (e) { toast(e.message, true); } };
+    window._saasStatus = async (id, status) => { try { await api(`/saas/companies/${id}/status`, { method: 'POST', body: { status } }); toast('Estado actualizado'); render(); } catch (e) { toast(e.message, true); } };
+    const active = companies.filter(c => c.subStatus === 'active').length;
+    const mrr = companies.filter(c => c.subStatus === 'active').reduce((s, c) => s + ((plans.find(p => p.code === c.planCode) || {}).priceMonthly || 0), 0);
+    return `
+      <div class="grid cols-4">
+        <div class="kpi"><div class="label">Empresas (tenants)</div><div class="value">${companies.length}</div></div>
+        <div class="kpi"><div class="label">Activas</div><div class="value" style="color:var(--green)">${active}</div></div>
+        <div class="kpi"><div class="label">Suspendidas</div><div class="value" style="color:${companies.some(c => c.subStatus === 'suspended') ? 'var(--red)' : 'inherit'}">${companies.filter(c => c.subStatus === 'suspended').length}</div></div>
+        <div class="kpi"><div class="label">MRR estimado</div><div class="value" style="color:var(--accent)">${cop(mrr)}</div></div>
+      </div>
+      <div class="card mt"><h3>Empresas del SaaS</h3>
+        <table><tr><th>Empresa</th><th>NIT</th><th>Plan</th><th>Estado</th><th>Usuarios</th><th>Sedes</th><th>Acciones</th></tr>
+        ${companies.map(c => `<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.nit)}</td>
+          <td><select onchange="_saasPlan('${c.id}', this.value)" style="width:auto">${plans.map(p => `<option value="${p.code}" ${p.code === c.planCode ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></td>
+          <td>${badge(stLabel[c.subStatus] || c.subStatus, stColor[c.subStatus] || 'gray')}</td>
+          <td>${c.users}</td><td>${c.properties}</td>
+          <td>${c.subStatus === 'suspended' ? `<button class="btn small" onclick="_saasStatus('${c.id}','active')">Reactivar</button>` : `<button class="btn small ghost danger" onclick="_saasStatus('${c.id}','suspended')">Suspender</button>`}</td>
+        </tr>`).join('')}</table>
+      </div>`;
+  }
+
   async function viewSettings() {
     const [users, params, props, gateways, templates, policies, me, sessions] = await Promise.all([
       get('/admin/users').catch(() => []),
@@ -2599,6 +2654,8 @@
     integrations: ['Centro de integraciones', viewIntegrations],
     automations: ['Automatizaciones — reglas no-code', viewAutomations],
     onboarding: ['Onboarding e importación de datos', viewOnboarding],
+    subscription: ['Mi suscripción y consumo', viewSubscription],
+    saasadmin: ['Consola del superadministrador SaaS', viewSaasAdmin],
     settings: ['Configuración', viewSettings],
   };
 

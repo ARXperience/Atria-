@@ -40,14 +40,14 @@ authRouter.post('/login', async (req, res) => {
   await audit({ companyId: user.companyId, user, action: 'auth.login', ip: req.ip });
   res.json({
     token: await issueSession(user, req),
-    user: { id: user.id, name: user.name, email: user.email, role: user.role, twoFactorEnabled: user.twoFactorEnabled },
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, twoFactorEnabled: user.twoFactorEnabled, isSuperAdmin: user.isSuperAdmin },
     properties: await accessibleProperties(user),
   });
 });
 
 authRouter.get('/me', authRequired, async (req, res) => {
   res.json({
-    user: { id: req.user.id, name: req.user.name, email: req.user.email, role: req.user.role, twoFactorEnabled: req.user.twoFactorEnabled },
+    user: { id: req.user.id, name: req.user.name, email: req.user.email, role: req.user.role, twoFactorEnabled: req.user.twoFactorEnabled, isSuperAdmin: req.user.isSuperAdmin },
     properties: await accessibleProperties(req.user),
   });
 });

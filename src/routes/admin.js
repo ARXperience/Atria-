@@ -7,6 +7,7 @@ import { requirePermission, propertyScope, ROLES } from '../middleware/auth.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
 import { importRooms, importGuests, importEmployees, goLiveChecklist } from '../services/importer.js';
+import { assertWithinLimit } from '../services/saas.js';
 
 export const adminRouter = Router();
 
@@ -128,6 +129,7 @@ adminRouter.post('/users', requirePermission('users.manage'), async (req, res) =
   if (!name || !email || !password || !role) return badRequest(res, 'name, email, password y role son requeridos');
   if (!ROLES.includes(role)) return badRequest(res, `Rol inválido. Use: ${ROLES.join(', ')}`);
   if (password.length < 8) return badRequest(res, 'La contraseña debe tener mínimo 8 caracteres');
+  try { await assertWithinLimit(req.user.companyId, 'users'); } catch (e) { return res.status(402).json({ error: e.message }); }
   const user = await prisma.user.create({
     data: {
       companyId: req.user.companyId, name,

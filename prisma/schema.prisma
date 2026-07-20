@@ -23,11 +23,36 @@ model Company {
   phone       String?
   fiscalRegime String?
   active      Boolean  @default(true)
+  // Suscripción SaaS (§55.1)
+  planCode        String   @default("trial")
+  subStatus       String   @default("trial") // trial | active | suspended | cancelled
+  trialEndsAt     DateTime?
+  currentPeriodEnd DateTime?
+  // White-label (§55.1)
+  commercialName  String?
+  brandColor      String?
+  logoUrl         String?
+  subdomain       String?  @unique
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   properties  Property[]
   users       User[]
   legalParameters LegalParameter[]
+}
+
+// Planes comerciales del SaaS (§55.1). Solo el superadministrador los gestiona.
+model Plan {
+  id             String  @id @default(cuid())
+  code           String  @unique // trial | basic | pro | enterprise
+  name           String
+  priceMonthly   Float   @default(0)
+  maxUsers       Int     @default(5)
+  maxProperties  Int     @default(1)
+  maxRooms       Int     @default(30)
+  aiMessagesMonth Int    @default(500)
+  modules        String  @default("*") // "*" o CSV de módulos habilitados
+  active         Boolean @default(true)
+  sortOrder      Int     @default(0)
 }
 
 model Property {
@@ -79,6 +104,7 @@ model User {
   role         String   // OWNER | MANAGER | FRONTDESK | SALES | HOUSEKEEPING | MAINTENANCE | ACCOUNTING | HR | AUDITOR
   propertyIds  String   @default("*") // "*" = todas las sedes, o lista CSV de ids
   active       Boolean  @default(true)
+  isSuperAdmin Boolean  @default(false) // superadministrador SaaS (§55.1)
   lastLoginAt  DateTime?
   // Seguridad avanzada (§55.3)
   twoFactorEnabled Boolean @default(false)

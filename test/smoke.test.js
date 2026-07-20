@@ -1617,6 +1617,44 @@ async function main() {
       assert.ok(!/copiloto financiero|resultado:/i.test(data.reply), 'no debe entregar el resumen financiero a housekeeping');
     });
 
+    // ===== Multi-tenant, planes y facturación SaaS (§55.1) =====
+    await test('la suscripción muestra plan y consumo vs límites', async () => {
+      const { status, data } = await api('/api/saas/subscription');
+      assert.equal(status, 200);
+      assert.equal(data.plan.code, 'pro');
+      assert.ok(Array.isArray(data.usage) && data.usage.find(u => u.key === 'users').limit === 25);
+    });
+
+    await test('el catálogo de planes está sembrado', async () => {
+      const { data } = await api('/api/saas/plans');
+      assert.ok(data.length >= 4);
+      assert.ok(data.find(p => p.code === 'enterprise'));
+    });
+
+    await test('un usuario normal no puede ver la consola de superadmin', async () => {
+      const res = await api('/api/saas/companies');
+      assert.equal(res.status, 403);
+    });
+
+    await test('el superadmin lista empresas y puede suspender/reactivar (con bloqueo 402)', async () => {
+      const { data: sa } = await api('/api/auth/login', { method: 'POST', body: { email: 'superadmin@atria.co', password: 'atria2026' } });
+      const SH = { 'content-type': 'application/json', authorization: `Bearer ${sa.token}` };
+      const companies = await (await fetch(`${BASE}/api/saas/companies`, { headers: SH })).json();
+      assert.ok(companies.length >= 1);
+      const company = companies[0];
+      // Suspender → el token del gerente queda bloqueado (402) en el resto de la API
+      await fetch(`${BASE}/api/saas/companies/${company.id}/status`, { method: 'POST', headers: SH, body: JSON.stringify({ status: 'suspended' }) });
+      const blocked = await fetch(`${BASE}/api/dashboard?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${token}` } });
+      assert.equal(blocked.status, 402, 'empresa suspendida bloquea la API');
+      // El superadmin NO queda bloqueado
+      const saOk = await fetch(`${BASE}/api/saas/companies`, { headers: SH });
+      assert.equal(saOk.status, 200);
+      // Reactivar → el gerente vuelve a operar
+      await fetch(`${BASE}/api/saas/companies/${company.id}/status`, { method: 'POST', headers: SH, body: JSON.stringify({ status: 'active' }) });
+      const ok = await fetch(`${BASE}/api/dashboard?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${token}` } });
+      assert.equal(ok.status, 200, 'tras reactivar, la API responde de nuevo');
+    });
+
     // ===== Onboarding e importadores (§55.2) =====
     await test('checklist de go-live evalúa la preparación de la sede', async () => {
       const { status, data } = await api(`/api/admin/checklist?propertyId=${propertyId}`);

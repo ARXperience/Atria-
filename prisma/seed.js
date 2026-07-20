@@ -2,8 +2,21 @@
 // legales 2026 (valores de ejemplo — actualizar con fuentes oficiales).
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { DEFAULT_PLANS } from '../src/services/saas.js';
 
 const prisma = new PrismaClient();
+
+async function ensurePlansAndSuperadmin(companyId) {
+  if ((await prisma.plan.count()) === 0) {
+    for (const p of DEFAULT_PLANS) await prisma.plan.create({ data: p });
+  }
+  await prisma.company.update({ where: { id: companyId }, data: { planCode: 'pro', subStatus: 'active', currentPeriodEnd: new Date(Date.UTC(new Date().getUTCFullYear() + 1, 0, 1)) } }).catch(() => {});
+  const exists = await prisma.user.findUnique({ where: { email: 'superadmin@atria.co' } });
+  if (!exists) {
+    const pass = await bcrypt.hash(process.env.SEED_PASSWORD || 'atria2026', 10);
+    await prisma.user.create({ data: { companyId, name: 'Super Admin SaaS', email: 'superadmin@atria.co', passwordHash: pass, role: 'OWNER', isSuperAdmin: true } });
+  }
+}
 
 // Parámetros de nómina colombiana (valores de ejemplo — validar con fuentes
 // oficiales). Se aplican también sobre instalaciones existentes (idempotente).
@@ -65,9 +78,10 @@ async function main() {
   const existing = await prisma.company.findFirst();
   if (existing) {
     await ensurePayrollParams(existing.id);
+    await ensurePlansAndSuperadmin(existing.id);
     const property = await prisma.property.findFirst({ where: { companyId: existing.id } });
     if (property) await ensureDemoEmployees(existing.id, property.id);
-    console.log('Seed incremental aplicado (parámetros de nómina y empleados demo).');
+    console.log('Seed incremental aplicado (parámetros de nómina, planes SaaS y empleados demo).');
     return;
   }
 
@@ -196,6 +210,7 @@ async function main() {
   }
 
   await ensurePayrollParams(company.id);
+  await ensurePlansAndSuperadmin(company.id);
   await ensureDemoEmployees(company.id, property.id);
 
   console.log('✅ Seed completado.');
