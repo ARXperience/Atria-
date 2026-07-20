@@ -5,7 +5,7 @@ import { propertyScope, requirePermission } from '../middleware/auth.js';
 import { calculatePeriod, closePeriod, simulateLiquidation, noveltyTypes } from '../services/payroll.js';
 import { createDraftContract, renderContractText } from '../services/contracts.js';
 import { createShift, clockIn, clockOut } from '../services/shifts.js';
-import { preparePila, registerPilaPayment, pilaCsv } from '../services/pila.js';
+import { preparePila, registerPilaPayment, pilaCsv, pilaFlatFile } from '../services/pila.js';
 import { generateElectronicPayroll, transmitElectronicPayroll, nominaProviderConfigured } from '../services/electronicPayroll.js';
 import { requestApproval } from '../services/approvals.js';
 import { audit } from '../lib/audit.js';
@@ -322,6 +322,13 @@ hrRouter.patch('/pila/:id/payment', requirePermission('payroll.manage'), async (
 hrRouter.get('/pila/:id/export', requirePermission('payroll.view'), async (req, res) => {
   const pila = await prisma.pilaFile.findUnique({ where: { id: req.params.id } });
   if (!pila || !propertyScope(req, pila.propertyId)) return res.status(404).json({ error: 'Planilla no encontrada' });
+  // ?format=flat → archivo plano estructura Res. 1388 (Tipo 1 + Tipo 2); por defecto CSV.
+  if (req.query.format === 'flat') {
+    const company = await prisma.company.findUnique({ where: { id: pila.companyId } });
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="PILA-${pila.month}-${pila.year}.txt"`);
+    return res.end(pilaFlatFile(pila, company));
+  }
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="PILA-${pila.month}-${pila.year}.csv"`);
   res.end(pilaCsv(pila));

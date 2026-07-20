@@ -106,14 +106,44 @@ export async function confirmReservation(reservationId, { actor = 'system', user
   return updated;
 }
 
+// Política de cancelación (§10): calcula la penalidad y el monto reembolsable
+// según el plan tarifario (reembolsable / no reembolsable) y la anticipación.
+// Ventana de cancelación gratuita por defecto: 48 h antes del check-in.
+const FREE_CANCELLATION_HOURS = 48;
+
+export function cancellationPenalty(reservation, ratePlan, paid) {
+  const nonRefundable = ratePlan && ratePlan.refundable === false;
+  if (nonRefundable) {
+    return { policy: 'non_refundable', penalty: money(paid), refundAmount: 0, freeWindow: false };
+  }
+  const hoursToCheckIn = (new Date(reservation.checkIn).getTime() - Date.now()) / 3_600_000;
+  const withinFreeWindow = hoursToCheckIn >= FREE_CANCELLATION_HOURS;
+  if (withinFreeWindow) {
+    return { policy: 'flexible', penalty: 0, refundAmount: money(paid), freeWindow: true };
+  }
+  // Cancelación tardía de tarifa flexible: penalidad = anticipo requerido (o lo pagado si es menor).
+  const penalty = money(Math.min(paid, reservation.depositRequired));
+  return { policy: 'late_cancellation', penalty, refundAmount: money(paid - penalty), freeWindow: false };
+}
+
 export async function cancelReservation(reservationId, { reason = null, actor = 'human', user = null } = {}) {
-  const reservation = await prisma.reservation.findUnique({ where: { id: reservationId } });
+  const reservation = await prisma.reservation.findUnique({ where: { id: reservationId }, include: { payments: true } });
   if (!reservation) throw new Error('Reserva no encontrada');
   if (['checked_in', 'checked_out'].includes(reservation.status)) throw new Error('No se puede cancelar una estadía en curso o cerrada');
-  const updated = await prisma.reservation.update({ where: { id: reservationId }, data: { status: 'cancelled', notes: reason ? `${reservation.notes || ''}\nCancelación: ${reason}`.trim() : reservation.notes } });
-  await audit({ propertyId: reservation.propertyId, user, actor, action: 'reservation.cancelled', entity: 'Reservation', entityId: reservationId, before: { status: reservation.status }, after: { status: 'cancelled' }, reason });
+
+  const ratePlan = reservation.ratePlanId ? await prisma.ratePlan.findUnique({ where: { id: reservation.ratePlanId } }) : null;
+  const paid = money(reservation.payments.filter(p => p.status === 'approved' && p.kind !== 'refund').reduce((s, p) => s + p.amount, 0));
+  const c = cancellationPenalty(reservation, ratePlan, paid);
+  const note = `Cancelación${reason ? `: ${reason}` : ''} · Política ${c.policy} · Penalidad ${c.penalty} · Reembolsable ${c.refundAmount}`;
+
+  const updated = await prisma.reservation.update({
+    where: { id: reservationId },
+    data: { status: 'cancelled', notes: `${reservation.notes || ''}\n${note}`.trim() },
+  });
+  await audit({ propertyId: reservation.propertyId, user, actor, action: 'reservation.cancelled', entity: 'Reservation', entityId: reservationId, before: { status: reservation.status }, after: { status: 'cancelled', ...c }, reason });
   emitEvent('reservation.cancelled', { propertyId: reservation.propertyId, reservationId });
-  return updated;
+  // El reembolso (si aplica) se ejecuta por el motor de aprobaciones, no automáticamente.
+  return { ...updated, cancellation: { paid, ...c } };
 }
 
 // Check-in (sección 11): valida pago mínimo, TRA y asigna habitación.

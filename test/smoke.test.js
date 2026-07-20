@@ -654,6 +654,15 @@ async function main() {
       assert.match(t.data.title, /prueba/i);
     });
 
+    await test('el canal webhook entrega de verdad por HTTP (falla ante URL inalcanzable)', async () => {
+      // Puerto cerrado → la entrega intenta el POST real y registra 'failed'.
+      const ch = await api('/api/notification-channels', { method: 'POST', body: { propertyId, type: 'webhook', target: 'http://127.0.0.1:9/atria-hook', minSeverity: 'info' } });
+      assert.equal(ch.status, 201);
+      const t = await api(`/api/notification-channels/${ch.data.id}/test`, { method: 'POST' });
+      assert.equal(t.data.status, 'failed', 'el POST real falla contra un puerto cerrado');
+      assert.match(t.data.detail, /Error de red|Webhook/);
+    });
+
     await test('rol housekeeping no puede ver pagos (permisos backend)', async () => {
       const { data: login } = await api('/api/auth/login', { method: 'POST', body: { email: 'housekeeping@atria.co', password: 'atria2026' } });
       const res = await fetch(`${BASE}/api/payments?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${login.token}` } });
@@ -1249,6 +1258,18 @@ async function main() {
       assert.match(csv, /Pedro N[oó]mina Test/);
     });
 
+    await test('exportar PILA en archivo plano (estructura Res. 1388)', async () => {
+      const res = await fetch(`${BASE}/api/hr/pila/${pilaId}/export?format=flat`, { headers: { authorization: `Bearer ${hrToken}` } });
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-disposition') || '', /\.txt/);
+      const txt = await res.text();
+      const lines = txt.split('\r\n');
+      assert.equal(lines[0][0], '1', 'la primera línea es el registro de control Tipo 1');
+      assert.ok(lines.slice(1).every(l => l[0] === '2'), 'las demás líneas son registros Tipo 2 por cotizante');
+      assert.ok(txt.includes('900100200'), 'incluye el documento del cotizante');
+      assert.ok(lines[0].includes('|'), 'los campos van delimitados');
+    });
+
     await test('registrar pago de PILA', async () => {
       const { status, data } = await hr(`/api/hr/pila/${pilaId}/payment`, { method: 'PATCH', body: { support: 'REF-PILA-123' } });
       assert.equal(status, 200);
@@ -1414,6 +1435,16 @@ async function main() {
       assert.ok(full.data.folio.charges.some(c => c.concept === 'room_service'), 'el folio tiene el cargo de room service');
     });
 
+    await test('check-out express desde el portal detecta el saldo pendiente (§14)', async () => {
+      const full = await api(`/api/reservations/${roomServiceResvId}`);
+      const r = await fetch(`${BASE}/api/public/guest/reservation/${full.data.code}/express-checkout`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      assert.equal(r.status, 200);
+      const d = await r.json();
+      // Tiene consumo de room service sin pagar → pide pagar antes de cerrar.
+      assert.equal(d.needsPayment, true);
+      assert.ok(d.balance > 0);
+    });
+
     // ===== Acciones sensibles con aprobación real (§47/§55.6) =====
     await test('descuento al folio requiere aprobación y publica un cargo negativo', async () => {
       const req = await api(`/api/reservations/${roomServiceResvId}/discount`, { method: 'POST', body: { amount: 40000, reason: 'Cortesía por demora' } });
@@ -1459,6 +1490,44 @@ async function main() {
       assert.equal(dec.status, 200);
       const full = await api(`/api/reservations/${noDepositResvId}`);
       assert.equal(full.data.status, 'cancelled');
+    });
+
+    // ===== Política de cancelación: penalidad y reembolso (§10) =====
+    await test('cancelación flexible fuera de ventana → sin penalidad, reembolso total', async () => {
+      const { cancellationPenalty } = await import('../src/services/reservations.js');
+      const r = { checkIn: futureDay(60), depositRequired: 100000 };
+      const c = cancellationPenalty(r, { refundable: true }, 100000);
+      assert.equal(c.policy, 'flexible');
+      assert.equal(c.penalty, 0);
+      assert.equal(c.refundAmount, 100000);
+    });
+
+    await test('cancelación flexible dentro de ventana (≤48h) → penalidad = anticipo', async () => {
+      const { cancellationPenalty } = await import('../src/services/reservations.js');
+      const r = { checkIn: new Date(Date.now() + 12 * 3600000), depositRequired: 100000 };
+      const c = cancellationPenalty(r, { refundable: true }, 250000);
+      assert.equal(c.policy, 'late_cancellation');
+      assert.equal(c.penalty, 100000);
+      assert.equal(c.refundAmount, 150000);
+    });
+
+    await test('cancelación de tarifa NO reembolsable → retiene todo lo pagado', async () => {
+      const { cancellationPenalty } = await import('../src/services/reservations.js');
+      const r = { checkIn: futureDay(60), depositRequired: 100000 };
+      const c = cancellationPenalty(r, { refundable: false }, 250000);
+      assert.equal(c.policy, 'non_refundable');
+      assert.equal(c.penalty, 250000);
+      assert.equal(c.refundAmount, 0);
+    });
+
+    await test('el endpoint de cancelación devuelve el desglose de penalidad', async () => {
+      const ci = futureDay(60), co = futureDay(62);
+      const av = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1 } });
+      const resv = await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1, roomTypeId: av.data[0].roomTypeId, guest: { fullName: 'Cancela Flexible' } } });
+      const cancel = await api(`/api/reservations/${resv.data.reservation.id}/cancel`, { method: 'POST', body: { reason: 'Cambio de planes' } });
+      assert.equal(cancel.status, 200);
+      assert.ok(cancel.data.cancellation, 'incluye el desglose de cancelación');
+      assert.equal(cancel.data.cancellation.policy, 'flexible');
     });
 
     // ===== IA que ejecuta con vista previa (§41/§55.6) =====

@@ -2504,7 +2504,8 @@
         ${p.inconsistencies.length ? `<p style="color:var(--yellow);font-size:12.5px">⚠ Afiliaciones faltantes: ${p.inconsistencies.map(i => esc(i.employee) + ' (' + i.missing.join(', ') + ')').join('; ')}</p>` : ''}
         <table class="mt"><tr><th>Empleado</th><th>IBC</th><th>Salud</th><th>Pensión</th><th>ARL</th><th>CCF</th><th>Total</th></tr>
         ${p.rows.map(r => `<tr><td>${esc(r.employee)}</td><td>${cop(r.ibc)}</td><td>${cop(r.salud)}</td><td>${cop(r.pension)}</td><td>${cop(r.arlAmt)}</td><td>${cop(r.ccf)}</td><td><b>${cop(r.total)}</b></td></tr>`).join('')}</table>
-        <button class="btn small secondary mt" onclick="_dl('/hr/pila/${p.id}/export','PILA-${p.month}-${p.year}.csv')">Descargar CSV</button>`);
+        <div class="row mt"><button class="btn small secondary fit" onclick="_dl('/hr/pila/${p.id}/export','PILA-${p.month}-${p.year}.csv')">Descargar CSV</button>
+        <button class="btn small secondary fit" onclick="_dl('/hr/pila/${p.id}/export?format=flat','PILA-${p.month}-${p.year}.txt')">Archivo plano (Res. 1388)</button></div>`);
     }) : null;
     const now = new Date();
     window._createPeriod = async () => {
@@ -2539,12 +2540,33 @@
     };
     window._slipShow = json => {
       const { name, b } = JSON.parse(json);
-      const rows = list => list.map(x => `<tr><td>${esc(x.concept)}${x.detail ? ` <span class="muted" style="font-size:11px">(${esc(x.detail)})</span>` : ''}</td><td class="right">${cop(x.amount)}</td></tr>`).join('');
-      modal(`<h2>Desprendible — ${esc(name)}</h2>
+      const rows = list => (list || []).map(x => `<tr><td>${esc(x.concept)}${x.detail ? ` <span class="muted" style="font-size:11px">(${esc(x.detail)})</span>` : ''}</td><td class="right">${cop(x.amount)}</td></tr>`).join('');
+      const m = modal(`<div style="display:flex;justify-content:space-between;align-items:center"><h2>Desprendible — ${esc(name)}</h2><button class="btn small secondary" id="slipPrint">🖨️ Imprimir / PDF</button></div>
         <h3 class="mt">Devengados</h3><table>${rows(b.earned)}</table>
         <h3 class="mt">Deducciones (IBC ${cop(b.IBC)})</h3><table>${rows(b.deductions)}</table>
         <h3 class="mt">Costos patronales</h3><table>${rows(b.employer)}</table>
         <h3 class="mt">Provisiones prestacionales</h3><table>${rows(b.provisions)}</table>`);
+      m.querySelector('#slipPrint').onclick = () => _slipPrint(name, b);
+    };
+    // Comprobante imprimible (el navegador lo guarda como PDF).
+    window._slipPrint = (name, b) => {
+      const empresa = (state.company?.commercialName || state.company?.name || 'Atria Hospitality');
+      const money0 = n => '$ ' + Math.round(n || 0).toLocaleString('es-CO');
+      const sec = (title, list) => `<h3>${title}</h3><table>${(list || []).map(x => `<tr><td>${x.concept}${x.detail ? ` <small>(${x.detail})</small>` : ''}</td><td class="r">${money0(x.amount)}</td></tr>`).join('')}</table>`;
+      const totalEarned = (b.earned || []).reduce((s, x) => s + x.amount, 0);
+      const totalDed = (b.deductions || []).reduce((s, x) => s + x.amount, 0);
+      const w = window.open('', '_blank');
+      w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Desprendible ${name}</title>
+        <style>body{font-family:Arial,sans-serif;color:#111;margin:32px;font-size:13px}h1{font-size:18px;margin:0}h2{font-size:13px;color:#555;font-weight:400;margin:2px 0 18px}h3{font-size:13px;margin:16px 0 6px;border-bottom:1px solid #ccc;padding-bottom:3px}table{width:100%;border-collapse:collapse}td{padding:3px 0}.r{text-align:right}.tot{font-weight:700;border-top:2px solid #111}@media print{button{display:none}}</style></head>
+        <body><h1>${empresa}</h1><h2>Comprobante de nómina — ${name}</h2>
+        ${sec('Devengados', b.earned)}
+        ${sec('Deducciones (IBC ' + money0(b.IBC) + ')', b.deductions)}
+        <table><tr class="tot"><td>Neto a pagar</td><td class="r">${money0(totalEarned - totalDed)}</td></tr></table>
+        ${sec('Costos patronales', b.employer)}
+        ${sec('Provisiones prestacionales', b.provisions)}
+        <p style="margin-top:24px;color:#888;font-size:11px">Generado por Atria Hospitality OS. Documento informativo del cálculo de nómina.</p>
+        <script>window.onload=()=>window.print()<\/script></body></html>`);
+      w.document.close();
     };
     window._addNovelty = async () => {
       try {
@@ -2989,7 +3011,7 @@
     window._ncDel = async id => { if (!confirm('¿Eliminar canal?')) return; try { await api(`/notification-channels/${id}`, { method: 'DELETE' }); toast('Eliminado'); render(); } catch (e) { toast(e.message, true); } };
     return `
       <div class="card"><h3>🔔 Canales de notificación</h3>
-        <p class="muted" style="font-size:12.5px">Reenvía las alertas internas a email, WhatsApp o un webhook según su severidad mínima. Los envíos quedan registrados abajo.</p>
+        <p class="muted" style="font-size:12.5px">Reenvía las alertas internas según su severidad mínima. El <b>webhook</b> se entrega por HTTP en tiempo real; email/WhatsApp requieren proveedor configurado. Cada envío queda registrado abajo.</p>
         <div class="row" style="align-items:flex-end;gap:10px">
           <div><label>Tipo</label><select id="ncType"><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="webhook">Webhook</option></select></div>
           <div style="flex:2"><label>Destino *</label><input id="ncTarget" placeholder="alertas@hotel.co / 573001234567 / https://..."></div>

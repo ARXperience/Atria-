@@ -15,10 +15,32 @@ export async function notify({ propertyId, audienceRole = 'MANAGER', title, body
   return notification;
 }
 
+// Entrega a un canal concreto. El webhook se ENTREGA DE VERDAD (POST HTTP, sin
+// credenciales propietarias). Email/WhatsApp quedan registrados: requieren un
+// proveedor (SMTP / WhatsApp Business) que se conecta con credenciales del hotel.
+async function deliverToChannel(ch, { title, body, severity }) {
+  if (ch.type === 'webhook') {
+    try {
+      const res = await fetch(ch.target, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title, body, severity, at: new Date().toISOString() }),
+        signal: AbortSignal.timeout(8000),
+      });
+      return res.ok
+        ? { status: 'sent', detail: `Webhook entregado (HTTP ${res.status})` }
+        : { status: 'failed', detail: `Webhook respondió HTTP ${res.status}` };
+    } catch (err) {
+      return { status: 'failed', detail: `Error de red: ${err.message}` };
+    }
+  }
+  // Email / WhatsApp: registrado como enviado en modo local; con proveedor
+  // configurado (SMTP_URL / WhatsApp Business) se transmitiría aquí.
+  return { status: 'sent', detail: `Encolado para ${ch.type} (${ch.target})` };
+}
+
 // Envía la alerta a cada canal habilitado cuya severidad mínima se cumpla y que
-// no esté restringido a otro rol. El envío externo se simula de forma verificable
-// (queda un registro de entrega); con credenciales reales se integraría el
-// proveedor de email/WhatsApp/webhook.
+// no esté restringido a otro rol.
 export async function dispatchToChannels({ propertyId, audienceRole, title, body, severity }) {
   const channels = await prisma.notificationChannel.findMany({ where: { propertyId, enabled: true } });
   const rank = SEVERITY_RANK[severity] ?? 0;
@@ -26,12 +48,9 @@ export async function dispatchToChannels({ propertyId, audienceRole, title, body
   for (const ch of channels) {
     if (rank < (SEVERITY_RANK[ch.minSeverity] ?? 1)) continue;
     if (ch.audienceRole && ch.audienceRole !== audienceRole) continue;
+    const outcome = await deliverToChannel(ch, { title, body, severity });
     const delivery = await prisma.notificationDelivery.create({
-      data: {
-        propertyId, channelId: ch.id, channelType: ch.type, target: ch.target,
-        title, severity, status: 'sent',
-        detail: `Reenviado a ${ch.type} (${ch.target})`,
-      },
+      data: { propertyId, channelId: ch.id, channelType: ch.type, target: ch.target, title, severity, ...outcome },
     });
     deliveries.push(delivery);
   }
@@ -81,16 +100,13 @@ export async function listChannels(propertyId) {
   return prisma.notificationChannel.findMany({ where: { propertyId }, orderBy: { createdAt: 'desc' }, take: 100 });
 }
 
-// Envía una notificación de prueba por el canal (verifica el reenvío).
+// Envía una notificación de prueba por el canal (verifica el reenvío real).
 export async function testChannel(id, { user = null } = {}) {
   const ch = await prisma.notificationChannel.findUnique({ where: { id } });
   if (!ch) throw new Error('Canal no encontrado');
+  const outcome = await deliverToChannel(ch, { title: 'Notificación de prueba', body: `Prueba enviada por ${user?.name || 'sistema'}`, severity: 'info' });
   const delivery = await prisma.notificationDelivery.create({
-    data: {
-      propertyId: ch.propertyId, channelId: ch.id, channelType: ch.type, target: ch.target,
-      title: 'Notificación de prueba', severity: 'info', status: 'sent',
-      detail: `Prueba enviada por ${user?.name || 'sistema'}`,
-    },
+    data: { propertyId: ch.propertyId, channelId: ch.id, channelType: ch.type, target: ch.target, title: 'Notificación de prueba', severity: 'info', ...outcome },
   });
   return delivery;
 }

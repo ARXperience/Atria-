@@ -93,3 +93,68 @@ export function pilaCsv(pila) {
   }
   return lines.join('\n');
 }
+
+// Archivo plano PILA en estructura de Registro Tipo 1 (control) + Registro
+// Tipo 2 (liquidación por cotizante), fiel al ordenamiento de la Resolución
+// 1388/2016. Los campos que no expone el perfil de empleado (subtipo, novedades,
+// exterior) usan los valores por defecto del cotizante dependiente (tipo 01);
+// para 100% de compatibilidad con un operador se enriquece el expediente con
+// apellidos/nombres separados y tipo de cotizante. Formato: campos delimitados.
+function padNum(n, width) { return String(Math.round(Number(n) || 0)).padStart(width, '0'); }
+function padStr(s, width) { return String(s || '').slice(0, width).padEnd(width, ' '); }
+function splitName(full) {
+  const parts = String(full || '').trim().split(/\s+/);
+  // Heurística CO: los 2 últimos tokens son apellidos, el resto nombres.
+  const ap1 = parts.length >= 2 ? parts[parts.length - 2] : (parts[0] || '');
+  const ap2 = parts.length >= 2 ? parts[parts.length - 1] : '';
+  const nombres = parts.slice(0, Math.max(1, parts.length - 2)).join(' ') || parts[0] || '';
+  return { ap1, ap2, nombres };
+}
+
+export function pilaFlatFile(pila, company) {
+  const rows = JSON.parse(pila.rows);
+  const periodo = `${pila.year}-${String(pila.month).padStart(2, '0')}`;
+  // Registro Tipo 1 — control del aportante.
+  const t1 = [
+    '1',                                   // tipo de registro
+    'E',                                   // modalidad de la planilla (E: empresas)
+    padNum(1, 10),                         // secuencia de la planilla
+    'NI',                                  // tipo de documento del aportante
+    padStr(company?.nit || '', 16),        // número de documento del aportante
+    padStr(company?.name || '', 200),      // razón social
+    periodo,                               // periodo de pago pensiones/salud (AAAA-MM)
+    padNum(pila.employeeCount, 5),         // total de cotizantes
+    padNum(pila.totalIBC, 12),             // total IBC
+    padNum(pila.totalContributions, 12),   // total aportes
+  ].join('|');
+  // Registro Tipo 2 — liquidación de aportes por cotizante.
+  const t2 = rows.map((r, i) => {
+    const { ap1, ap2, nombres } = splitName(r.employee);
+    return [
+      '2',                        // tipo de registro
+      padNum(i + 1, 5),           // secuencia del cotizante
+      'CC',                       // tipo de documento del cotizante
+      padStr(r.document, 16),     // número de documento
+      '01',                       // tipo de cotizante (01: dependiente)
+      '00',                       // subtipo de cotizante
+      padStr(ap1, 20),            // primer apellido
+      padStr(ap2, 30),            // segundo apellido
+      padStr(nombres, 30),        // nombres
+      padNum(30, 2),              // días cotizados (mes completo)
+      padNum(r.ibc, 12),          // IBC
+      padStr(r.eps || '', 6),     // código EPS
+      padNum(r.salud, 12),        // cotización salud
+      padStr(r.afp || '', 6),     // código AFP
+      padNum(r.pension, 12),      // cotización pensión
+      padNum(r.fsp, 12),          // fondo de solidaridad pensional
+      padStr(r.arl || '', 6),     // código ARL
+      padNum(r.arlAmt, 12),       // cotización riesgos laborales
+      padStr(r.ccf || '', 6),     // código CCF
+      padNum(r.ccf, 12),          // aporte CCF
+      padNum(r.sena, 12),         // aporte SENA
+      padNum(r.icbf, 12),         // aporte ICBF
+      padNum(r.total, 12),        // total aportes del cotizante
+    ].join('|');
+  });
+  return [t1, ...t2].join('\r\n');
+}
