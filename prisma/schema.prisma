@@ -80,8 +80,38 @@ model User {
   propertyIds  String   @default("*") // "*" = todas las sedes, o lista CSV de ids
   active       Boolean  @default(true)
   lastLoginAt  DateTime?
+  // Seguridad avanzada (§55.3)
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String?  // secreto TOTP (base32); nulo si 2FA desactivado
+  passwordUpdatedAt DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// Recuperación de contraseña (§55.3): token de un solo uso con vencimiento.
+model PasswordReset {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique // hash del token (nunca se guarda en claro)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Sesiones activas (§55.3): permite ver dispositivos y revocar accesos.
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  jti        String   @unique // id del token JWT emitido
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  revokedAt  DateTime?
+
+  @@index([userId, revokedAt])
 }
 
 // Parámetros legales versionados por vigencia (sección 3 y 6 del documento funcional)

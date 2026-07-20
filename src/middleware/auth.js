@@ -45,9 +45,9 @@ export function hasPermission(role, perm) {
   return perms.includes(`${domain}.*`);
 }
 
-export function signToken(user) {
+export function signToken(user, jti = null) {
   return jwt.sign(
-    { sub: user.id, role: user.role, companyId: user.companyId, name: user.name },
+    { sub: user.id, role: user.role, companyId: user.companyId, name: user.name, ...(jti ? { jti } : {}) },
     config.jwtSecret,
     { expiresIn: '12h' },
   );
@@ -61,6 +61,15 @@ export async function authRequired(req, res, next) {
     const payload = jwt.verify(token, config.jwtSecret);
     const user = await prisma.user.findUnique({ where: { id: payload.sub } });
     if (!user || !user.active) return res.status(401).json({ error: 'Usuario inactivo' });
+    // Revocación de sesión (§55.3): si el token trae jti, la sesión debe existir y estar activa.
+    if (payload.jti) {
+      const session = await prisma.session.findUnique({ where: { jti: payload.jti } });
+      if (!session || session.revokedAt) return res.status(401).json({ error: 'Sesión revocada. Inicia sesión de nuevo.' });
+      if (Date.now() - new Date(session.lastSeenAt).getTime() > 60_000) {
+        prisma.session.update({ where: { jti: payload.jti }, data: { lastSeenAt: new Date() } }).catch(() => {});
+      }
+      req.sessionJti = payload.jti;
+    }
     req.user = user;
     next();
   } catch {

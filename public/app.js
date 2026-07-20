@@ -2381,14 +2381,37 @@
   }
 
   async function viewSettings() {
-    const [users, params, props, gateways, templates, policies] = await Promise.all([
+    const [users, params, props, gateways, templates, policies, me, sessions] = await Promise.all([
       get('/admin/users').catch(() => []),
       get('/admin/legal-parameters').catch(() => []),
       get('/admin/properties'),
       get('/payments/gateways').catch(() => []),
       get(`/documents/templates/list?${pid()}`).catch(() => []),
       get(`/documents/policies/list?${pid()}`).catch(() => []),
+      get('/auth/me').catch(() => ({ user: state.user })),
+      get('/auth/sessions').catch(() => []),
     ]);
+    const twoFA = !!me?.user?.twoFactorEnabled;
+    window._2faSetup = async () => {
+      try {
+        const s = await api('/auth/2fa/setup', { method: 'POST' });
+        modal(`<h3>Activar verificación en dos pasos</h3>
+          <p class="muted" style="font-size:13px">Escanea o ingresa este secreto en tu app autenticadora (Google Authenticator, Authy, 1Password) y luego escribe el código de 6 dígitos.</p>
+          <div class="mt" style="text-align:center;padding:12px;background:var(--surface-2);border-radius:var(--r-sm);font-family:monospace;font-size:16px;letter-spacing:2px">${esc(s.secret)}</div>
+          <div class="muted mt" style="font-size:11px;word-break:break-all">${esc(s.otpauthUrl)}</div>
+          <div class="mt"><label>Código de 6 dígitos</label><input id="fa2code" inputmode="numeric" maxlength="6" placeholder="000000"></div>
+          <div class="right mt"><button class="btn secondary" onclick="this.closest('.modal-bg').remove()">Cancelar</button>
+          <button class="btn" onclick="_2faEnable()">Activar</button></div>`);
+      } catch (e) { toast(e.message, true); }
+    };
+    window._2faEnable = async () => { try { await api('/auth/2fa/enable', { method: 'POST', body: { code: $('#fa2code').value } }); toast('2FA activado ✅'); document.querySelector('.modal-bg')?.remove(); render(); } catch (e) { toast(e.message, true); } };
+    window._2faDisable = async () => { const code = prompt('Ingresa un código 2FA (o deja vacío para usar tu contraseña):'); const body = code ? { code } : { password: prompt('Tu contraseña actual:') }; try { await api('/auth/2fa/disable', { method: 'POST', body }); toast('2FA desactivado'); render(); } catch (e) { toast(e.message, true); } };
+    window._chPass = async () => {
+      try { await api('/auth/password', { method: 'POST', body: { current: $('#pwCur').value, password: $('#pwNew').value } }); toast('Contraseña actualizada ✅'); $('#pwCur').value = ''; $('#pwNew').value = ''; }
+      catch (e) { toast(e.message, true); }
+    };
+    window._revokeSession = async id => { try { await api(`/auth/sessions/${id}/revoke`, { method: 'POST' }); toast('Sesión cerrada'); render(); } catch (e) { toast(e.message, true); } };
+    window._revokeOthers = async () => { if (!confirm('¿Cerrar todas las demás sesiones?')) return; try { await api('/auth/sessions/revoke-others', { method: 'POST' }); toast('Otras sesiones cerradas'); render(); } catch (e) { toast(e.message, true); } };
     const prop = props.find(p => p.id === state.propertyId) || props[0];
     window._addUser = async () => {
       try {
@@ -2416,6 +2439,28 @@
     };
     const roles = ['MANAGER', 'FRONTDESK', 'SALES', 'HOUSEKEEPING', 'MAINTENANCE', 'ACCOUNTING', 'HR', 'AUDITOR', 'OWNER'];
     return `
+      <div class="card"><h3>🔐 Seguridad de mi cuenta</h3>
+        <div class="grid cols-2">
+          <div>
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <div><b>Verificación en dos pasos (2FA)</b><div class="muted" style="font-size:12px">${twoFA ? 'Activa — se pide un código al iniciar sesión.' : 'Recomendada para cuentas con permisos sensibles.'}</div></div>
+              ${twoFA ? `<button class="btn small ghost danger" onclick="_2faDisable()">Desactivar</button>` : `<button class="btn small" onclick="_2faSetup()">Activar</button>`}
+            </div>
+            <div class="mt"><b>Cambiar contraseña</b>
+              <div class="row mt">
+                <div><label>Actual</label><input id="pwCur" type="password"></div>
+                <div><label>Nueva</label><input id="pwNew" type="password" placeholder="mín. 8, con letra y número"></div>
+                <button class="btn fit" onclick="_chPass()">Cambiar</button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="row" style="justify-content:space-between;align-items:baseline"><b>Sesiones activas (${sessions.length})</b>${sessions.length > 1 ? `<button class="btn small ghost" onclick="_revokeOthers()">Cerrar las demás</button>` : ''}</div>
+            <table class="mt"><tr><th>Dispositivo</th><th>Última actividad</th><th></th></tr>
+            ${sessions.map(s => `<tr><td style="font-size:12px">${esc((s.userAgent || 'Desconocido').slice(0, 32))}${s.current ? ' <span class="badge green" style="font-size:9px">actual</span>' : ''}<div class="muted" style="font-size:11px">${esc(s.ip || '')}</div></td><td style="font-size:12px">${dt(s.lastSeenAt)}</td><td>${s.current ? '' : `<button class="btn small ghost" onclick="_revokeSession('${s.id}')">Cerrar</button>`}</td></tr>`).join('')}</table>
+          </div>
+        </div>
+      </div>
       <div class="card"><h3>Sede: ${esc(prop?.name || '')}</h3>
         <p class="muted">RNT: ${esc(prop?.rnt || 'sin registrar')} · ${prop?._count?.rooms ?? '—'} habitaciones · Webchat público: <a style="color:var(--accent2)" href="/chat.html?propertyId=${prop?.id}" target="_blank">/chat.html</a></p>
       </div>

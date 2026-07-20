@@ -2,6 +2,7 @@
 // críticos de la sección 48 del documento funcional.
 import { spawn } from 'node:child_process';
 import assert from 'node:assert';
+import { totpCode } from '../src/lib/totp.js';
 
 const PORT = 4599;
 const BASE = `http://localhost:${PORT}`;
@@ -1614,6 +1615,78 @@ async function main() {
       const data = await res.json();
       assert.equal(res.status, 200);
       assert.ok(!/copiloto financiero|resultado:/i.test(data.reply), 'no debe entregar el resumen financiero a housekeeping');
+    });
+
+    // ===== Seguridad avanzada (§55.3): 2FA, recuperación, sesiones =====
+    const secEmail = `sec-${Date.now()}@atria.co`;
+    await test('crear usuario dedicado para pruebas de seguridad', async () => {
+      const u = await api('/api/admin/users', { method: 'POST', body: { name: 'Seguridad Test', email: secEmail, password: 'Segura123', role: 'FRONTDESK' } });
+      assert.equal(u.status, 201);
+    });
+
+    async function secLogin(extra = {}) {
+      const res = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: secEmail, password: 'Segura123', ...extra }) });
+      return { status: res.status, data: await res.json() };
+    }
+
+    await test('política de contraseñas rechaza claves débiles', async () => {
+      const { data: login } = await secLogin();
+      const weak = await fetch(`${BASE}/api/auth/password`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${login.token}` }, body: JSON.stringify({ current: 'Segura123', password: 'corta' }) });
+      assert.equal(weak.status, 400);
+    });
+
+    let secSecret;
+    await test('activar 2FA exige un código TOTP válido', async () => {
+      const { data: login } = await secLogin();
+      const H = { 'content-type': 'application/json', authorization: `Bearer ${login.token}` };
+      const setup = await (await fetch(`${BASE}/api/auth/2fa/setup`, { method: 'POST', headers: H })).json();
+      assert.ok(setup.secret && setup.otpauthUrl.includes('otpauth://'));
+      secSecret = setup.secret;
+      const bad = await fetch(`${BASE}/api/auth/2fa/enable`, { method: 'POST', headers: H, body: JSON.stringify({ code: '000000' }) });
+      assert.equal(bad.status, 400);
+      const ok = await fetch(`${BASE}/api/auth/2fa/enable`, { method: 'POST', headers: H, body: JSON.stringify({ code: totpCode(secSecret) }) });
+      assert.equal(ok.status, 200);
+    });
+
+    await test('con 2FA activo, el login pide código y lo valida', async () => {
+      const noCode = await secLogin();
+      assert.equal(noCode.data.twoFactorRequired, true);
+      assert.ok(!noCode.data.token, 'sin código no debe emitir token');
+      const withCode = await secLogin({ code: totpCode(secSecret) });
+      assert.equal(withCode.status, 200);
+      assert.ok(withCode.data.token, 'con código válido emite token');
+    });
+
+    await test('panel de sesiones lista y permite revocar', async () => {
+      const { data: login } = await secLogin({ code: totpCode(secSecret) });
+      const H = { 'content-type': 'application/json', authorization: `Bearer ${login.token}` };
+      const sessions = await (await fetch(`${BASE}/api/auth/sessions`, { headers: H })).json();
+      assert.ok(Array.isArray(sessions) && sessions.length >= 1);
+      assert.ok(sessions.some(s => s.current), 'debe marcar la sesión actual');
+      // Revocar la sesión actual → el token deja de funcionar
+      await fetch(`${BASE}/api/auth/sessions/${sessions.find(s => s.current).id}/revoke`, { method: 'POST', headers: H });
+      const after = await fetch(`${BASE}/api/auth/sessions`, { headers: H });
+      assert.equal(after.status, 401, 'tras revocar, el token queda inválido');
+    });
+
+    await test('recuperación de contraseña con token de un solo uso', async () => {
+      const forgot = await (await fetch(`${BASE}/api/auth/forgot`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: secEmail }) })).json();
+      assert.ok(forgot.ok);
+      assert.ok(forgot.devToken, 'en dev debe devolver el token para pruebas');
+      // Nueva contraseña débil se rechaza
+      const weak = await fetch(`${BASE}/api/auth/reset`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: forgot.devToken, password: 'abc' }) });
+      assert.equal(weak.status, 400);
+      // Con contraseña válida, restablece
+      const ok = await fetch(`${BASE}/api/auth/reset`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: forgot.devToken, password: 'NuevaClave456' }) });
+      assert.equal(ok.status, 200);
+      // El token de reset no se puede reusar
+      const reuse = await fetch(`${BASE}/api/auth/reset`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: forgot.devToken, password: 'OtraClave789' }) });
+      assert.equal(reuse.status, 400);
+    });
+
+    await test('login con la contraseña vieja falla tras el reset', async () => {
+      const old = await secLogin({ code: totpCode(secSecret) }); // Segura123 ya no sirve
+      assert.equal(old.status, 401);
     });
 
     // ===== Endurecimiento para producción (§50) =====
