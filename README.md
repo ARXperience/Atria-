@@ -11,7 +11,7 @@ npm run setup            # crea la base de datos (SQLite) y siembra datos demo
 npm start                # http://localhost:4000
 ```
 
-**Usuarios demo** (contraseña `atria2026`):
+**Usuarios demo** (dominio ficticio `@atria.co`, contraseña por defecto `atria2026`):
 
 | Email | Rol |
 |---|---|
@@ -23,6 +23,12 @@ npm start                # http://localhost:4000
 | contabilidad@atria.co | Contabilidad |
 | rrhh@atria.co | RR. HH. |
 | auditor@atria.co | Auditor (solo lectura) |
+
+> ⚠️ **Seguridad**: estas credenciales son **solo para la demo local** — el dominio
+> `@atria.co` es ficticio y la contraseña solo abre la base sembrada. **En producción**
+> define `SEED_PASSWORD` con una clave fuerte (ver `.env.example`) o cambia las
+> contraseñas tras el primer arranque, y usa correos reales. Nunca reutilices esta
+> contraseña en cuentas reales.
 
 **Pruebas end-to-end**: `npm test` (167 pruebas de los flujos críticos de la sección 48 del documento).
 

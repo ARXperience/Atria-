@@ -8,6 +8,10 @@ storage/uploads/
 logs/
 .DS_Store
 
+# Scripts temporales de captura/depuración (no forman parte del producto)
+_shot*.mjs
+_*.mjs
+
 # Proyecto de video (Remotion) — dependencias y renders
 atria-video/node_modules/
 atria-video/out/

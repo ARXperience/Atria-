@@ -158,8 +158,11 @@ async function main() {
     }
   }
 
-  // Usuarios por rol (contraseña: atria2026)
-  const pass = await bcrypt.hash('atria2026', 10);
+  // Usuarios por rol. La contraseña se toma de SEED_PASSWORD; el valor por
+  // defecto 'atria2026' es SOLO para la demo local. En producción, define
+  // SEED_PASSWORD (o cambia las contraseñas tras el primer arranque).
+  const demoPassword = process.env.SEED_PASSWORD || 'atria2026';
+  const pass = await bcrypt.hash(demoPassword, 10);
   const users = [
     ['Dueño Demo', 'owner@atria.co', 'OWNER'],
     ['Gerente Demo', 'gerente@atria.co', 'MANAGER'],
@@ -198,7 +201,7 @@ async function main() {
   console.log('✅ Seed completado.');
   console.log(`   Empresa: ${company.name}`);
   console.log(`   Sedes:   ${property.name} · ${property2.name}`);
-  console.log('   Usuarios (contraseña: atria2026):');
+  console.log(`   Usuarios (contraseña: ${process.env.SEED_PASSWORD ? 'definida en SEED_PASSWORD' : 'atria2026 — solo demo'}):`);
   for (const [, email, role] of users) console.log(`     - ${email} (${role})`);
 }
 
