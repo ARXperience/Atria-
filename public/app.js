@@ -365,8 +365,30 @@
   }
 
   async function viewDashboard() {
-    const d = await get(`/dashboard?${pid()}`);
+    const [d, intel] = await Promise.all([
+      get(`/dashboard?${pid()}`),
+      get(`/ai/insights?${pid()}`).catch(() => ({ insights: [], counts: {} })),
+    ]);
     setTimeout(animateCounts, 0);
+    const sevColor = { critical: 'var(--red)', warning: 'var(--yellow)', info: 'var(--accent2)' };
+    const sevIcon = { critical: '🔴', warning: '🟡', info: '🔵' };
+    const areaLabel = { revenue: 'Revenue', finance: 'Finanzas', reputation: 'Reputación', guest: 'Huéspedes', marketing: 'Marketing', approvals: 'Aprobaciones', knowledge: 'Conocimiento', maintenance: 'Mantenimiento', inventory: 'Inventario' };
+    const intelCard = intel.insights?.length ? `
+      <div class="card mt" style="border-left:3px solid var(--accent)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3>🧠 Atria Intelligence — recomendaciones de hoy</h3>
+          <span class="muted" style="font-size:12px">${intel.counts.critical || 0} críticas · ${intel.counts.warning || 0} importantes</span>
+        </div>
+        <div style="display:grid;gap:8px;margin-top:10px">
+          ${intel.insights.map(i => `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 10px;background:var(--surface-2);border-radius:var(--r-sm)">
+            <span style="font-size:13px">${sevIcon[i.severity] || '🔵'}</span>
+            <div style="flex:1">
+              <div style="font-weight:600;font-size:13px">${esc(i.title)} <span class="badge" style="font-size:9.5px;opacity:.7">${esc(areaLabel[i.area] || i.area)}</span></div>
+              <div class="muted" style="font-size:12px;margin:2px 0 3px">${esc(i.detail)}</div>
+              <div style="font-size:11.5px;color:${sevColor[i.severity]}">→ ${esc(i.action)}</div>
+            </div></div>`).join('')}
+        </div>
+      </div>` : '';
     return `
       <div class="grid cols-4">
         <div class="kpi"><div class="label">Ocupación</div><div class="value"><span data-count="${d.rooms.occupancyPct}" data-fmt="pct">0%</span><small> ${d.rooms.occupied}/${d.rooms.total - d.rooms.outOfService}</small></div></div>
@@ -374,6 +396,7 @@
         <div class="kpi"><div class="label">RevPAR (mes)</div><div class="value"><span data-count="${d.kpis.revpar}" data-fmt="cop">$0</span></div></div>
         <div class="kpi"><div class="label">Ingresos del mes</div><div class="value"><span data-count="${d.kpis.monthRevenue}" data-fmt="cop">$0</span></div></div>
       </div>
+      ${intelCard}
       <div class="grid cols-2 mt">
         <div class="card"><h3>Llegadas de hoy (${d.today.arrivals.length})</h3>
           ${d.today.arrivals.length ? `<table>${d.today.arrivals.map(a => `<tr class="clickable" onclick="location.hash='res:${a.id}'"><td>${esc(a.code)}</td><td>${esc(a.guest)}</td><td>${a.adults} pax</td></tr>`).join('')}</table>` : '<p class="muted">Sin llegadas programadas.</p>'}

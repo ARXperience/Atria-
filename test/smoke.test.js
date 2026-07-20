@@ -1405,6 +1405,15 @@ async function main() {
       menuItemId = mi.data.id;
     });
 
+    await test('el agente aprende la carta del restaurante y responde por ella', async () => {
+      // El menú entra al snapshot de conocimiento del agente.
+      const snap = await api(`/api/content/knowledge-snapshot?propertyId=${propertyId}&visibility=public`);
+      assert.ok(Array.isArray(snap.data.menu) && snap.data.menu.some(m => m.name === 'Café americano'), 'la carta está en el conocimiento');
+      // El agente recupera el plato por una pregunta de restaurante (RAG).
+      const { data } = await api('/api/content/agents/preview', { method: 'POST', body: { propertyId, scope: 'guest', question: '¿tienen café? ¿cuánto cuesta?' } });
+      assert.ok(/café/i.test(data.answer || '') || (data.sources || []).some(s => /café/i.test(s.title || s.answer)), 'el agente responde con el ítem de la carta');
+    });
+
     await test('comanda de mesa pagada descuenta el inventario por receta', async () => {
       const ord = await api('/api/pos/orders', { method: 'POST', body: { propertyId, type: 'table', tableLabel: 'Mesa 3', items: [{ menuItemId, qty: 2 }] } });
       assert.equal(ord.status, 201);
@@ -2060,6 +2069,36 @@ async function main() {
       assert.ok(data.venues >= 2);
       assert.ok(data.confirmed >= 1);
       assert.ok(data.pipeline >= 0);
+    });
+
+    // ===== Atria Intelligence: recomendaciones transversales (§38/§41) =====
+    await test('el motor de recomendaciones cruza módulos y prioriza', async () => {
+      const { status, data } = await api(`/api/ai/insights?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(Array.isArray(data.insights), 'devuelve una lista de recomendaciones');
+      assert.ok('counts' in data, 'trae el conteo por severidad');
+      // Cada recomendación es accionable y de un área conocida.
+      for (const i of data.insights) {
+        assert.ok(i.title && i.action && i.area, 'cada recomendación tiene título, acción y área');
+        assert.ok(['critical', 'warning', 'info'].includes(i.severity));
+      }
+      // Ordenadas por severidad (críticas primero).
+      const rank = { critical: 3, warning: 2, info: 1 };
+      for (let k = 1; k < data.insights.length; k++) {
+        assert.ok(rank[data.insights[k - 1].severity] >= rank[data.insights[k].severity], 'orden por severidad');
+      }
+    });
+
+    await test('el briefing devuelve un resumen accionable', async () => {
+      const { status, data } = await api(`/api/ai/briefing?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(typeof data.summary === 'string' && data.summary.length > 0, 'resumen en lenguaje natural');
+    });
+
+    await test('el copiloto interno responde "¿qué hago hoy?" con recomendaciones', async () => {
+      const { status, data } = await api('/api/assistant/internal', { method: 'POST', body: { propertyId, text: '¿en qué me enfoco hoy?' } });
+      assert.equal(status, 200);
+      assert.match(data.reply, /Atria Intelligence|prioridad|orden/i);
     });
 
     // ===== Centro de integraciones (§45) =====

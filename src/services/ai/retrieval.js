@@ -29,6 +29,16 @@ function buildDocs(snapshot) {
     parts.push(`Desde ${Math.round(r.fromPrice).toLocaleString('es-CO')} COP/noche.`);
     docs.push({ type: 'room', title: r.name, strong: r.name, body: `${r.bedConfig || ''} ${r.view || ''} ${r.features || ''} ${r.amenities || ''} ${r.longDescription || r.description || ''}`, answer: parts.join(' ') });
   }
+  // Carta del restaurante / room service: cada plato es un documento recuperable.
+  const catLabel = { comida: 'Plato', bebida: 'Bebida', minibar: 'Minibar', postre: 'Postre' };
+  for (const m of snapshot.menu || []) {
+    docs.push({
+      type: 'menu', title: m.name,
+      strong: `${m.name} ${catLabel[m.category] || m.category} restaurante room service carta menu`,
+      body: `${m.category} ${m.name}`,
+      answer: `${m.name} (${catLabel[m.category] || m.category}) — ${Math.round(m.price).toLocaleString('es-CO')} COP. Disponible por room service.`,
+    });
+  }
   return docs;
 }
 

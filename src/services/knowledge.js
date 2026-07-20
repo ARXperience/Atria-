@@ -124,6 +124,9 @@ export async function knowledgeSnapshot(propertyId, { visibility = 'public' } = 
     currentOnly: true, // el agente nunca ve conocimiento vencido o aún no vigente (§55.5)
   });
   const policies = await prisma.hotelPolicy.findMany({ where: { propertyId, active: true } });
+  // Carta del restaurante/room service: entrena al agente para responder platos,
+  // precios y hacer upsell de consumos (§ restaurante/POS).
+  const menu = await prisma.menuItem.findMany({ where: { propertyId, active: true }, orderBy: [{ category: 'asc' }, { price: 'asc' }], select: { name: true, category: true, price: true } });
   return {
     hotel: {
       name: property?.name, city: property?.city, address: property?.address,
@@ -133,5 +136,6 @@ export async function knowledgeSnapshot(propertyId, { visibility = 'public' } = 
     rooms,
     knowledge: items.map(i => ({ category: i.category, title: i.title, content: i.content, tags: i.tags, updatedAt: i.updatedAt })),
     policies: policies.map(p => ({ type: p.type, title: p.title, text: p.publicText || p.conditions })),
+    menu: menu.map(m => ({ name: m.name, category: m.category, price: m.price })),
   };
 }

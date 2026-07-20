@@ -37,6 +37,7 @@ import { reputationRouter } from './routes/reputation.js';
 import { eventsRouter } from './routes/events.js';
 import { integrationsRouter } from './routes/integrations.js';
 import { automationsRouter } from './routes/automations.js';
+import { aiRouter } from './routes/ai.js';
 import { miscRouter } from './routes/misc.js';
 import { publicRouter } from './routes/public.js';
 import { registerAutomations } from './services/automations.js';
@@ -108,6 +109,7 @@ app.use('/api/reputation', authRequired, reputationRouter);
 app.use('/api/events', authRequired, eventsRouter);
 app.use('/api/integrations', authRequired, integrationsRouter);
 app.use('/api/automations', authRequired, automationsRouter);
+app.use('/api/ai', authRequired, aiRouter);
 app.use('/api', authRequired, miscRouter);
 
 // Frontend estático: panel admin + página de pago + portal huésped

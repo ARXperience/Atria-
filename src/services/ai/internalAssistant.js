@@ -143,6 +143,13 @@ export async function internalAssistantReply({ user, propertyId, text }) {
     return { reply: `📊 Ocupación: *${occ}%* (${c.occupied || 0}/${total - oos}). Ingresos del mes: ${fmtCOP(fo.monthIncome)}, resultado: ${fmtCOP(fo.monthNet)}. Cartera por cobrar: ${fmtCOP(fo.receivable)}.` };
   }
 
+  // 14.5) Recomendaciones / "qué hago hoy" (Atria Intelligence)
+  if (/(que hago|prioridad|recomiend|recomendaci|que hacer hoy|briefing|en que me enfoco|foco de hoy)/.test(t) && can('dashboard.view')) {
+    const { insightsBriefing } = await import('./advisor.js');
+    const b = await insightsBriefing(propertyId, { role: user.role, userName: user.name });
+    return { reply: `🧠 *Atria Intelligence*\n${b.summary}` };
+  }
+
   // 15) Conocimiento interno
   const snap = await knowledgeSnapshot(propertyId, { visibility: 'internal' });
   const hit = searchKnowledge(snap, text);

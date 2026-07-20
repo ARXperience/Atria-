@@ -65,5 +65,9 @@ export function buildSystemPrompt(profile, snapshot, { userRole = null } = {}) {
     lines.push('\nPOLÍTICAS:');
     for (const p of snapshot.policies) lines.push(`- ${p.title}: ${p.text || ''}`);
   }
+  if (snapshot.menu?.length) {
+    lines.push('\nCARTA DEL RESTAURANTE / ROOM SERVICE (puedes sugerir platos y precios; si el huésped desea pedir, ofrece tomar el pedido y avisa que se cargará a la habitación):');
+    for (const m of snapshot.menu) lines.push(`- ${m.name} (${m.category}): ${Math.round(m.price).toLocaleString('es-CO')} COP`);
+  }
   return lines.join('\n');
 }
