@@ -1165,6 +1165,20 @@ model Lead {
   @@index([propertyId, stage])
 }
 
+// Segmento dinámico de huéspedes para marketing/CRM (§12/§36)
+model GuestSegment {
+  id          String   @id @default(cuid())
+  propertyId  String
+  name        String
+  description String?
+  criteria    String   // JSON: minStays, city, nationality, marketingConsent, lastStayWithinDays, inactiveDays, minSpend, language
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([propertyId])
+}
+
 // Cuenta corporativa / agencia con tarifa negociada y crédito (§35)
 model CorporateAccount {
   id             String   @id @default(cuid())

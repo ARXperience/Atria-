@@ -56,7 +56,7 @@ function contactField(channel) {
 
 // Construye la audiencia elegible. Para huéspedes exige marketingConsent salvo
 // que la campaña sea transaccional (no aplica aquí: marketing siempre lo exige).
-export async function buildAudience(propertyId, { channel = 'email', audience = 'guests', segment = null } = {}) {
+export async function buildAudience(propertyId, { channel = 'email', audience = 'guests', segment = null, segmentId = null } = {}) {
   const seg = parseSegment(segment);
   const field = contactField(channel);
   if (audience === 'leads') {
@@ -66,6 +66,15 @@ export async function buildAudience(propertyId, { channel = 'email', audience = 
     const leads = await prisma.lead.findMany({ where, select: { id: true, name: true, email: true, phone: true }, take: 5000 });
     return { eligible: leads, skippedNoConsent: 0 };
   }
+  // Segmento guardado: evalúa sus criterios y filtra por contacto + consentimiento.
+  const segId = segmentId || seg.segmentId;
+  if (segId) {
+    const { getSegmentMembers } = await import('./segments.js');
+    const { members } = await getSegmentMembers(segId);
+    const withContact = members.filter(m => m[field]);
+    const eligible = withContact.filter(m => m.marketingConsent);
+    return { eligible, skippedNoConsent: withContact.length - eligible.length };
+  }
   // Huéspedes: contacto presente + consentimiento de marketing.
   const where = { propertyId, [field]: { not: null } };
   if (seg.city) where.city = seg.city;
@@ -74,10 +83,12 @@ export async function buildAudience(propertyId, { channel = 'email', audience = 
   return { eligible, skippedNoConsent: guests.length - eligible.length };
 }
 
-export async function createCampaign({ propertyId, name, channel = 'email', audience = 'guests', segment = null, subject = null, message, scheduledAt = null, createdBy = null }) {
+export async function createCampaign({ propertyId, name, channel = 'email', audience = 'guests', segment = null, segmentId = null, subject = null, message, scheduledAt = null, createdBy = null }) {
   if (!name || !message) throw new Error('name y message requeridos');
   if (!CHANNELS.includes(channel)) throw new Error(`channel inválido (${CHANNELS.join(', ')})`);
   if (!AUDIENCES.includes(audience)) throw new Error(`audience inválida (${AUDIENCES.join(', ')})`);
+  // Un segmento guardado se persiste como { segmentId } en la columna segment.
+  if (segmentId) segment = { segmentId };
   const { eligible, skippedNoConsent } = await buildAudience(propertyId, { channel, audience, segment });
   const segStr = segment && typeof segment === 'object' ? JSON.stringify(segment) : segment;
   return prisma.campaign.create({

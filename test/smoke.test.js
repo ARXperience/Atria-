@@ -346,6 +346,71 @@ async function main() {
       assert.equal(res.status, 400, 'no quedan huéspedes pendientes');
     });
 
+    // ===== CRM: scoring de leads + segmentos (§12/§36) =====
+    let hotLeadId;
+    await test('un lead con intención de reserva y fechas puntúa alto (hot)', async () => {
+      const { status, data } = await api('/api/crm/leads', { method: 'POST', body: {
+        propertyId, name: 'Prospecto Caliente', phone: '573001112233', channel: 'whatsapp',
+        intent: 'reserva', checkIn: futureDay(7), checkOut: futureDay(10), adults: 4,
+      } });
+      assert.equal(status, 201);
+      assert.ok(data.score >= 60, `score alto esperado, fue ${data.score}`);
+      assert.equal(data.grade, 'hot');
+      hotLeadId = data.id;
+    });
+
+    await test('un lead con poca señal puntúa bajo (cold)', async () => {
+      const { data } = await api('/api/crm/leads', { method: 'POST', body: { propertyId, name: 'Curioso', email: 'x@y.co', channel: 'web', intent: 'info' } });
+      assert.ok(data.score < 30, `score bajo esperado, fue ${data.score}`);
+      assert.equal(data.grade, 'cold');
+    });
+
+    await test('el detalle del score explica las señales', async () => {
+      const { status, data } = await api(`/api/crm/leads/${hotLeadId}/score`);
+      assert.equal(status, 200);
+      assert.ok(data.signals.length >= 3, 'lista las señales que suman');
+      assert.ok(data.signals.some(s => /reserva/i.test(s.label)), 'incluye la intención de reserva');
+    });
+
+    await test('recalcular scores recorre los leads abiertos', async () => {
+      const { status, data } = await api('/api/crm/leads/rescore', { method: 'POST', body: { propertyId } });
+      assert.equal(status, 200);
+      assert.ok(data.total >= 2, 'evalúa los leads abiertos');
+    });
+
+    let segmentId;
+    await test('crear un segmento y previsualizar su tamaño', async () => {
+      const prev = await api('/api/crm/segments/preview', { method: 'POST', body: { propertyId, criteria: { minStays: 1 } } });
+      assert.equal(prev.status, 200);
+      assert.ok(prev.data.count >= 1, 'hay huéspedes con al menos una estadía');
+      const { status, data } = await api('/api/crm/segments', { method: 'POST', body: { propertyId, name: 'Huéspedes recurrentes', description: '1+ estadías', criteria: { minStays: 1 } } });
+      assert.equal(status, 201);
+      segmentId = data.id;
+    });
+
+    await test('el segmento aparece listado con su conteo', async () => {
+      const { data } = await api(`/api/crm/segments?propertyId=${propertyId}`);
+      const s = data.find(x => x.id === segmentId);
+      assert.ok(s, 'el segmento aparece');
+      assert.ok(s.count >= 1, 'trae el conteo evaluado');
+      assert.equal(s.criteria.minStays, 1);
+    });
+
+    await test('una campaña puede dirigirse a un segmento guardado', async () => {
+      const { status, data } = await api('/api/marketing/campaigns', { method: 'POST', body: { propertyId, name: 'Reactivación recurrentes', channel: 'email', audience: 'guests', segmentId, message: 'Vuelve con nosotros' } });
+      assert.equal(status, 201);
+      // La audiencia de la campaña se limita a los miembros del segmento (con contacto+consentimiento).
+      const members = await api(`/api/crm/segments/${segmentId}/members`);
+      assert.ok(data.audienceCount + (data.skippedNoConsent || 0) <= members.data.count, 'la audiencia sale del segmento');
+    });
+
+    await test('eliminar un segmento', async () => {
+      const del = await api(`/api/crm/segments/${segmentId}`, { method: 'DELETE' });
+      assert.equal(del.status, 200);
+      const { data } = await api(`/api/crm/segments?propertyId=${propertyId}`);
+      assert.ok(!data.some(x => x.id === segmentId), 'ya no aparece');
+    });
+
     // ===== Encuestas post-estadía + quejas (§37) =====
     await test('el check-out crea una encuesta post-estadía', async () => {
       await settle(400);

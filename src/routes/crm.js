@@ -4,6 +4,8 @@ import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
 import { guestRecall, getGuestMemory } from '../services/ai/memory.js';
 import { createCorporateAccount, updateCorporateAccount, listCorporateAccounts, accountStatement, createRoomingList, addRoomingEntry, getRoomingList, listRoomingLists, materializeRoomingList } from '../services/corporate.js';
+import { computeLeadScore, leadGrade, rescoreAllLeads } from '../services/leadScoring.js';
+import { createSegment, updateSegment, deleteSegment, listSegments, getSegmentMembers, evaluateCriteria } from '../services/segments.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, parseDay } from '../lib/util.js';
 
@@ -97,17 +99,17 @@ crmRouter.post('/leads', requirePermission('crm.create'), async (req, res) => {
   const { propertyId, name, phone, email, channel = 'phone', intent, checkIn, checkOut, adults, notes } = req.body || {};
   if (!propertyScope(req, propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
   if (!name && !phone && !email) return badRequest(res, 'Se requiere al menos nombre, teléfono o email');
-  const lead = await prisma.lead.create({
-    data: {
-      propertyId, name, phone, email, channel, intent,
-      checkIn: checkIn ? parseDay(checkIn) : null,
-      checkOut: checkOut ? parseDay(checkOut) : null,
-      adults: adults ? +adults : null, notes,
-      assignedTo: req.user.name,
-    },
-  });
+  const data0 = {
+    propertyId, name, phone, email, channel, intent,
+    checkIn: checkIn ? parseDay(checkIn) : null,
+    checkOut: checkOut ? parseDay(checkOut) : null,
+    adults: adults ? +adults : null, notes,
+    assignedTo: req.user.name,
+  };
+  const { score } = computeLeadScore(data0);
+  const lead = await prisma.lead.create({ data: { ...data0, score } });
   await audit({ propertyId, user: req.user, action: 'lead.created', entity: 'Lead', entityId: lead.id, after: req.body });
-  res.status(201).json(lead);
+  res.status(201).json({ ...lead, grade: leadGrade(lead.score) });
 });
 
 crmRouter.patch('/leads/:id', requirePermission('crm.edit'), async (req, res) => {
@@ -115,9 +117,62 @@ crmRouter.patch('/leads/:id', requirePermission('crm.edit'), async (req, res) =>
   if (!lead || !propertyScope(req, lead.propertyId)) return res.status(404).json({ error: 'Lead no encontrado' });
   const allowed = ['stage', 'score', 'assignedTo', 'notes', 'lostReason', 'intent', 'name', 'phone', 'email'];
   const data = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
+  // Recalcula el score salvo que se fije manualmente.
+  if (data.score === undefined) data.score = computeLeadScore({ ...lead, ...data }).score;
   const updated = await prisma.lead.update({ where: { id: lead.id }, data });
   await audit({ propertyId: lead.propertyId, user: req.user, action: 'lead.updated', entity: 'Lead', entityId: lead.id, before: lead, after: data });
-  res.json(updated);
+  res.json({ ...updated, grade: leadGrade(updated.score) });
+});
+
+// Detalle del score de un lead (señales que lo componen)
+crmRouter.get('/leads/:id/score', requirePermission('crm.view'), async (req, res) => {
+  const lead = await prisma.lead.findUnique({ where: { id: req.params.id } });
+  if (!lead || !propertyScope(req, lead.propertyId)) return res.status(404).json({ error: 'Lead no encontrado' });
+  const { score, signals } = computeLeadScore(lead);
+  res.json({ score, grade: leadGrade(score), signals });
+});
+
+// Recalcular el score de todos los leads abiertos
+crmRouter.post('/leads/rescore', requirePermission('crm.edit'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await rescoreAllLeads(req.body.propertyId, { user: req.user }));
+});
+
+// ---- Segmentos de huéspedes (§12/§36) ----
+crmRouter.get('/segments', requirePermission('crm.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await listSegments(req.query.propertyId));
+});
+
+crmRouter.post('/segments/preview', requirePermission('crm.view'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  const members = await evaluateCriteria(req.body.propertyId, req.body?.criteria || {});
+  res.json({ count: members.length, sample: members.slice(0, 20) });
+});
+
+crmRouter.get('/segments/:id/members', requirePermission('crm.view'), async (req, res) => {
+  const seg = await prisma.guestSegment.findUnique({ where: { id: req.params.id } });
+  if (!seg || !propertyScope(req, seg.propertyId)) return res.status(404).json({ error: 'Segmento no encontrado' });
+  res.json(await getSegmentMembers(seg.id));
+});
+
+crmRouter.post('/segments', requirePermission('crm.create'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try { res.status(201).json(await createSegment({ ...req.body, user: req.user })); }
+  catch (err) { badRequest(res, err.message); }
+});
+
+crmRouter.patch('/segments/:id', requirePermission('crm.edit'), async (req, res) => {
+  const seg = await prisma.guestSegment.findUnique({ where: { id: req.params.id } });
+  if (!seg || !propertyScope(req, seg.propertyId)) return res.status(404).json({ error: 'Segmento no encontrado' });
+  try { res.json(await updateSegment(seg.id, { ...req.body, user: req.user })); }
+  catch (err) { badRequest(res, err.message); }
+});
+
+crmRouter.delete('/segments/:id', requirePermission('crm.edit'), async (req, res) => {
+  const seg = await prisma.guestSegment.findUnique({ where: { id: req.params.id } });
+  if (!seg || !propertyScope(req, seg.propertyId)) return res.status(404).json({ error: 'Segmento no encontrado' });
+  res.json(await deleteSegment(seg.id, { user: req.user }));
 });
 
 crmRouter.get('/guests', requirePermission('guests.view'), async (req, res) => {

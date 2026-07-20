@@ -684,22 +684,92 @@
   }
 
   async function viewCrm() {
-    const leads = await get(`/crm/leads?${pid()}`);
+    const [leads, segments] = await Promise.all([
+      get(`/crm/leads?${pid()}`),
+      get(`/crm/segments?${pid()}`).catch(() => []),
+    ]);
+    // Ordena por score descendente para priorizar la gestión comercial.
+    leads.sort((a, b) => (b.score || 0) - (a.score || 0));
     window._leadStage = async (id, stage) => {
       try { await api(`/crm/leads/${id}`, { method: 'PATCH', body: { stage } }); toast('Lead actualizado'); render(); }
       catch (err) { toast(err.message, true); }
     };
-    return `<div class="card"><table>
+    window._rescore = async () => {
+      try { const { data } = await api('/crm/leads/rescore', { method: 'POST', body: { propertyId: state.propertyId } }); toast(`${data.updated} lead(s) recalculados`); render(); }
+      catch (err) { toast(err.message, true); }
+    };
+    window._leadScore = async id => {
+      const s = await get(`/crm/leads/${id}/score`);
+      modal(`<h2>Score del lead: ${s.score}/100 ${gradeBadge(s.grade)}</h2>
+        <table class="mt"><tr><th>Señal</th><th>Puntos</th></tr>
+          ${s.signals.map(x => `<tr><td>${esc(x.label)}</td><td>+${x.pts}</td></tr>`).join('') || '<tr><td colspan="2" class="muted">Sin señales positivas.</td></tr>'}
+        </table>`);
+    };
+    const gradeBadge = g => g === 'hot' ? badge('🔥 Hot', 'red') : g === 'warm' ? badge('Warm', 'yellow') : badge('Cold', 'gray');
+    const gradeOf = s => s >= 60 ? 'hot' : s >= 30 ? 'warm' : 'cold';
+    // Gestión de segmentos
+    window._segNew = () => {
+      const m = modal(`<h2>Nuevo segmento de huéspedes</h2>
+        <div class="row"><div style="flex:2"><label>Nombre *</label><input id="sgName" placeholder="Recurrentes VIP"></div></div>
+        <label>Descripción</label><input id="sgDesc" placeholder="Huéspedes con 2+ estadías y consentimiento">
+        <h3 class="mt">Criterios</h3>
+        <div class="row">
+          <div><label>Mín. estadías</label><input id="sgStays" type="number" placeholder="0"></div>
+          <div><label>Gasto mínimo</label><input id="sgSpend" type="number" placeholder="0"></div>
+          <div><label>Ciudad</label><input id="sgCity" placeholder="Bogotá"></div>
+        </div>
+        <div class="row">
+          <div><label>Última estadía ≤ (días)</label><input id="sgRecent" type="number" placeholder=""></div>
+          <div><label>Inactivo ≥ (días)</label><input id="sgInactive" type="number" placeholder=""></div>
+          <div class="fit"><label style="display:inline">Solo con consentimiento</label> <input type="checkbox" id="sgConsent" style="width:auto"></div>
+        </div>
+        <div class="row mt"><button class="btn secondary fit" id="sgPreview">Vista previa</button><button class="btn fit" id="sgSave">Guardar segmento</button></div>
+        <div id="sgResult" class="muted mt" style="font-size:12.5px"></div>`);
+      const criteria = () => {
+        const c = {};
+        if (+m.querySelector('#sgStays').value) c.minStays = +m.querySelector('#sgStays').value;
+        if (+m.querySelector('#sgSpend').value) c.minSpend = +m.querySelector('#sgSpend').value;
+        if (m.querySelector('#sgCity').value.trim()) c.city = m.querySelector('#sgCity').value.trim();
+        if (+m.querySelector('#sgRecent').value) c.lastStayWithinDays = +m.querySelector('#sgRecent').value;
+        if (+m.querySelector('#sgInactive').value) c.inactiveDays = +m.querySelector('#sgInactive').value;
+        if (m.querySelector('#sgConsent').checked) c.marketingConsent = true;
+        return c;
+      };
+      m.querySelector('#sgPreview').onclick = async () => {
+        try { const { data } = await api('/crm/segments/preview', { method: 'POST', body: { propertyId: state.propertyId, criteria: criteria() } }); m.querySelector('#sgResult').textContent = `${data.count} huésped(es) cumplen estos criterios.`; }
+        catch (err) { toast(err.message, true); }
+      };
+      m.querySelector('#sgSave').onclick = async () => {
+        try { await api('/crm/segments', { method: 'POST', body: { propertyId: state.propertyId, name: m.querySelector('#sgName').value, description: m.querySelector('#sgDesc').value, criteria: criteria() } }); toast('Segmento creado'); m.remove(); render(); }
+        catch (err) { toast(err.message, true); }
+      };
+    };
+    window._segDel = async id => { if (!confirm('¿Eliminar segmento?')) return; try { await api(`/crm/segments/${id}`, { method: 'DELETE' }); toast('Eliminado'); render(); } catch (e) { toast(e.message, true); } };
+    const hot = leads.filter(l => (l.score || 0) >= 60 && ['new', 'qualified', 'quoted'].includes(l.stage)).length;
+    return `
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center">
+        <h3>Leads ${hot ? `· <span style="color:var(--red)">${hot} hot 🔥</span>` : ''}</h3>
+        <button class="btn small secondary" onclick="_rescore()">Recalcular scores</button></div>
+      <table>
       <tr><th>Nombre</th><th>Teléfono</th><th>Canal</th><th>Fechas</th><th>Score</th><th>Etapa</th><th></th></tr>
       ${leads.map(l => `<tr>
         <td>${esc(l.name || '—')}</td><td>${esc(l.phone || '—')}</td><td>${esc(l.channel)}</td>
         <td>${l.checkIn ? day(l.checkIn) + ' → ' + day(l.checkOut) : '—'}</td>
-        <td>${l.score}</td><td>${sb(l.stage)}</td>
+        <td><a onclick="_leadScore('${l.id}')" style="cursor:pointer"><b>${l.score}</b> ${gradeBadge(gradeOf(l.score || 0))}</a></td><td>${sb(l.stage)}</td>
         <td>${['new', 'qualified', 'quoted'].includes(l.stage) ? `
           <button class="btn small secondary" onclick="_leadStage('${l.id}','won')">Ganado</button>
           <button class="btn small secondary" onclick="_leadStage('${l.id}','lost')">Perdido</button>` : ''}</td>
       </tr>`).join('')}
-    </table>${leads.length ? '' : '<p class="muted">Sin leads. Se crean automáticamente desde WhatsApp/webchat.</p>'}</div>`;
+    </table>${leads.length ? '' : '<p class="muted">Sin leads. Se crean automáticamente desde WhatsApp/webchat.</p>'}</div>
+
+    <div class="card mt"><div style="display:flex;justify-content:space-between;align-items:center">
+      <h3>🎯 Segmentos de huéspedes</h3><button class="btn small" onclick="_segNew()">+ Nuevo segmento</button></div>
+      <p class="muted" style="font-size:12px">Grupos dinámicos que puedes usar como audiencia en campañas de marketing.</p>
+      ${segments.length ? `<table><tr><th>Segmento</th><th>Criterios</th><th>Huéspedes</th><th></th></tr>
+        ${segments.map(s => `<tr><td><b>${esc(s.name)}</b>${s.description ? `<div class="muted" style="font-size:11px">${esc(s.description)}</div>` : ''}</td>
+          <td class="muted" style="font-size:11.5px">${esc(Object.entries(s.criteria).map(([k, v]) => `${k}: ${v}`).join(', ') || '—')}</td>
+          <td><b>${s.count}</b></td><td><button class="btn small ghost" onclick="_segDel('${s.id}')">✕</button></td></tr>`).join('')}</table>` : '<p class="muted">Sin segmentos. Crea uno para segmentar tu base.</p>'}
+    </div>`;
   }
 
   async function viewCorporate() {
@@ -1698,18 +1768,24 @@
   }
 
   async function viewMarketing() {
-    const ov = await get(`/marketing/overview?${pid()}`);
+    const [ov, segments] = await Promise.all([
+      get(`/marketing/overview?${pid()}`),
+      get(`/crm/segments?${pid()}`).catch(() => []),
+    ]);
     const chLabel = { email: '✉️ Email', whatsapp: '💬 WhatsApp', sms: '📱 SMS' };
     const stLabel = { draft: 'Borrador', scheduled: 'Programada', sent: 'Enviada', cancelled: 'Cancelada' };
+    const segVal = () => { const s = $('#mkSeg'); return s && $('#mkAud').value === 'guests' ? (s.value || null) : null; };
     window._mkPreview = async () => {
       try {
-        const a = await api(`/marketing/audience?${pid()}&channel=${$('#mkChannel').value}&audience=${$('#mkAud').value}`);
+        const seg = segVal();
+        const q = `${pid()}&channel=${$('#mkChannel').value}&audience=${$('#mkAud').value}${seg ? `&segment=${encodeURIComponent(JSON.stringify({ segmentId: seg }))}` : ''}`;
+        const a = await api(`/marketing/audience?${q}`);
         $('#mkAudInfo').innerHTML = `Audiencia elegible: <b>${a.eligible}</b>${a.skippedNoConsent ? ` · <span style="color:var(--yellow)">${a.skippedNoConsent} sin consentimiento (omitidos)</span>` : ''}`;
       } catch (e) { toast(e.message, true); }
     };
     window._mkCreate = async send => {
       try {
-        const c = await api('/marketing/campaigns', { method: 'POST', body: { propertyId: state.propertyId, name: $('#mkName').value, channel: $('#mkChannel').value, audience: $('#mkAud').value, subject: $('#mkSubject').value || null, message: $('#mkMsg').value } });
+        const c = await api('/marketing/campaigns', { method: 'POST', body: { propertyId: state.propertyId, name: $('#mkName').value, channel: $('#mkChannel').value, audience: $('#mkAud').value, segmentId: segVal(), subject: $('#mkSubject').value || null, message: $('#mkMsg').value } });
         if (send) await api(`/marketing/campaigns/${c.id}/send`, { method: 'POST' });
         toast(send ? 'Campaña enviada' : 'Campaña guardada'); render();
       } catch (e) { toast(e.message, true); }
@@ -1740,6 +1816,7 @@
           <div class="row mt">
             <div><label>Canal</label><select id="mkChannel" onchange="_mkPreview()"><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="sms">SMS</option></select></div>
             <div><label>Audiencia</label><select id="mkAud" onchange="_mkPreview()"><option value="guests">Huéspedes</option><option value="leads">Leads</option></select></div>
+            ${segments.length ? `<div><label>Segmento</label><select id="mkSeg" onchange="_mkPreview()"><option value="">Toda la base</option>${segments.map(s => `<option value="${s.id}">${esc(s.name)} (${s.count})</option>`).join('')}</select></div>` : ''}
           </div>
           <div class="mt"><label>Asunto (email)</label><input id="mkSubject" placeholder="Opcional"></div>
           <div class="mt"><div class="row" style="justify-content:space-between;align-items:baseline"><label>Mensaje</label><button class="btn ghost small" onclick="_mkDraft()">✨ Sugerir con IA</button></div><textarea id="mkMsg" rows="4" placeholder="Escribe el contenido de la campaña…"></textarea></div>
