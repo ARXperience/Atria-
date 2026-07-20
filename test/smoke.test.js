@@ -1530,6 +1530,21 @@ async function main() {
       assert.ok(data.totals.adr >= 0 && data.totals.revpar >= 0);
     });
 
+    await test('la condición de una regla filtra el disparo (reseña negativa)', async () => {
+      const rule = await api('/api/automations/rules', { method: 'POST', body: { propertyId, name: 'Reseña ≤ 2 → alerta', trigger: 'review.created', conditions: [{ field: 'rating', op: 'lt', value: 3 }], actionType: 'notify', actionParams: { role: 'MANAGER', title: 'Reseña negativa' } } });
+      assert.equal(rule.status, 201);
+      // Reseña positiva (rating 5): NO debe disparar
+      await api('/api/reputation/reviews', { method: 'POST', body: { propertyId, guestName: 'Feliz', source: 'google', rating: 5 } });
+      await settle(500);
+      let rc = (await api(`/api/automations/overview?propertyId=${propertyId}`)).data.rules.find(r => r.id === rule.data.id).runCount;
+      assert.equal(rc, 0, 'una reseña 5★ no cumple la condición rating<3');
+      // Reseña negativa (rating 2): SÍ debe disparar
+      await api('/api/reputation/reviews', { method: 'POST', body: { propertyId, guestName: 'Molesto', source: 'google', rating: 2 } });
+      await settle(500);
+      rc = (await api(`/api/automations/overview?propertyId=${propertyId}`)).data.rules.find(r => r.id === rule.data.id).runCount;
+      assert.equal(rc, 1, 'una reseña 2★ cumple la condición rating<3');
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {

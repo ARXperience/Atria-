@@ -2203,18 +2203,32 @@
         ? `<div><label>${esc(p.label)}</label><select id="aup_${p.key}">${p.options.map(o => `<option value="${o}">${esc(o)}</option>`).join('')}</select></div>`
         : `<div><label>${esc(p.label)}</label><input id="aup_${p.key}"></div>`).join('');
     };
+    // Campos disponibles en el payload de cada disparador (para condiciones).
+    const TRIGGER_FIELDS = {
+      'review.created': ['rating', 'sentiment', 'source'], 'payment.succeeded': ['amount'],
+      'reservation.confirmed': ['code'], 'event.confirmed': ['total', 'code'],
+      'booking.abandoned': ['code'], 'campaign.sent': ['channel', 'sent'],
+    };
+    window._auTrigChange = () => {
+      const fields = TRIGGER_FIELDS[$('#auTrigger').value] || [];
+      $('#auCondFields').innerHTML = fields.map(f => `<option value="${f}">`).join('');
+      $('#auCondHint').textContent = fields.length ? `Campos: ${fields.join(', ')}` : 'Este disparador no expone campos para filtrar.';
+    };
     window._auCreate = async () => {
       const type = $('#auAction').value;
       const act = ov.actions.find(a => a.type === type);
       const params = {};
       for (const p of act?.params || []) { const v = document.getElementById(`aup_${p.key}`)?.value; if (v) params[p.key] = v; }
-      try { await api('/automations/rules', { method: 'POST', body: { propertyId: state.propertyId, name: $('#auName').value, trigger: $('#auTrigger').value, actionType: type, actionParams: params } }); toast('Regla creada'); render(); }
+      const conditions = [];
+      const cField = $('#auCondField').value.trim();
+      if (cField) conditions.push({ field: cField, op: $('#auCondOp').value, value: $('#auCondVal').value });
+      try { await api('/automations/rules', { method: 'POST', body: { propertyId: state.propertyId, name: $('#auName').value, trigger: $('#auTrigger').value, conditions, actionType: type, actionParams: params } }); toast('Regla creada'); render(); }
       catch (e) { toast(e.message, true); }
     };
     window._auToggle = async (id, enabled) => { try { await api(`/automations/rules/${id}`, { method: 'PATCH', body: { enabled } }); toast(enabled ? 'Regla activada' : 'Regla pausada'); render(); } catch (e) { toast(e.message, true); } };
     window._auTest = async id => { try { const r = await api(`/automations/rules/${id}/test`, { method: 'POST', body: { payload: {} } }); toast(r.executed ? 'Regla ejecutada (prueba) ✅' : 'Las condiciones no coincidieron'); render(); } catch (e) { toast(e.message, true); } };
     window._auDel = async id => { if (!confirm('¿Eliminar esta regla?')) return; try { await api(`/automations/rules/${id}`, { method: 'DELETE' }); toast('Regla eliminada'); render(); } catch (e) { toast(e.message, true); } };
-    setTimeout(() => { animateCounts(); if ($('#auAction')) _auActChange(); }, 0);
+    setTimeout(() => { animateCounts(); if ($('#auAction')) _auActChange(); if ($('#auTrigger')) _auTrigChange(); }, 0);
     return `
       <div class="grid cols-4">
         <div class="kpi"><div class="label">Reglas</div><div class="value"><span data-count="${ov.total}">0</span></div></div>
@@ -2227,22 +2241,31 @@
         <p class="muted">Cuando ocurra un <b>disparador</b>, ejecuta una <b>acción</b>. Solo acciones de bajo riesgo; las sensibles siguen exigiendo aprobación humana.</p>
         <div class="row mt">
           <div><label>Nombre</label><input id="auName" placeholder="Avisar a ventas si reserva abandonada"></div>
-          <div><label>Cuando… (disparador)</label><select id="auTrigger">${ov.triggers.map(t => `<option value="${t.event}">${esc(t.label)}</option>`).join('')}</select></div>
+          <div><label>Cuando… (disparador)</label><select id="auTrigger" onchange="_auTrigChange()">${ov.triggers.map(t => `<option value="${t.event}">${esc(t.label)}</option>`).join('')}</select></div>
           <div><label>Entonces… (acción)</label><select id="auAction" onchange="_auActChange()">${ov.actions.map(a => `<option value="${a.type}">${esc(a.label)}</option>`).join('')}</select></div>
         </div>
         <div class="row mt" id="auParams"></div>
+        <div class="mt" style="padding-top:8px;border-top:1px dashed var(--border)">
+          <label>Solo si… (condición opcional)</label>
+          <div class="row">
+            <div><input id="auCondField" list="auCondFields" placeholder="campo (p.ej. rating)"><datalist id="auCondFields"></datalist></div>
+            <div><select id="auCondOp"><option value="eq">=</option><option value="neq">≠</option><option value="gt">&gt;</option><option value="lt">&lt;</option><option value="exists">existe</option></select></div>
+            <div><input id="auCondVal" placeholder="valor"></div>
+          </div>
+          <div class="muted" id="auCondHint" style="font-size:12px;margin-top:4px"></div>
+        </div>
         <div class="right mt"><button class="btn" onclick="_auCreate()">Crear regla</button></div>
       </div>
 
       <div class="card mt"><h3>Reglas configuradas</h3>
         ${ov.rules.length ? `<table><tr><th>Regla</th><th>Cuando</th><th>Entonces</th><th>Ejecuciones</th><th>Estado</th><th></th></tr>
-        ${ov.rules.map(r => `<tr><td><b>${esc(r.name)}</b></td><td>${esc(trigLabel[r.trigger] || r.trigger)}</td><td>${esc(actLabel[r.actionType] || r.actionType)}</td>
+        ${ov.rules.map(r => { const cond = (() => { try { const c = JSON.parse(r.conditions || '[]')[0]; return c ? `<div class="muted" style="font-size:11px">si ${esc(c.field)} ${({ eq: '=', neq: '≠', gt: '>', lt: '<', exists: 'existe' })[c.op] || c.op} ${esc(String(c.value ?? ''))}</div>` : ''; } catch { return ''; } })(); return `<tr><td><b>${esc(r.name)}</b></td><td>${esc(trigLabel[r.trigger] || r.trigger)}${cond}</td><td>${esc(actLabel[r.actionType] || r.actionType)}</td>
           <td>${r.runCount}${r.lastRunAt ? ` <span class="muted" style="font-size:11px">· ${day(r.lastRunAt)}</span>` : ''}</td>
           <td>${r.enabled ? sb('active') + ' activa' : badge('Pausada', 'gray')}</td>
           <td><button class="btn small ghost" onclick="_auTest('${r.id}')">Probar</button>
               <button class="btn small ghost" onclick="_auToggle('${r.id}', ${!r.enabled})">${r.enabled ? 'Pausar' : 'Activar'}</button>
               <button class="btn small ghost danger" onclick="_auDel('${r.id}')">Eliminar</button></td>
-        </tr>`).join('')}</table>` : '<p class="muted">Aún no hay reglas. Crea la primera arriba.</p>'}
+        </tr>`; }).join('')}</table>` : '<p class="muted">Aún no hay reglas. Crea la primera arriba.</p>'}
       </div>`;
   }
 
