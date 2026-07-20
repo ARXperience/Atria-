@@ -32,7 +32,7 @@ export async function upsertGuest({ propertyId, fullName, phone = null, email = 
 export async function createTentativeReservation({
   propertyId, guest, roomTypeId, ratePlanId = null, checkIn, checkOut,
   adults = 2, children = 0, channel = 'direct', createdBy = null, actor = 'human', notes = null,
-  discountPct = 0, corporateAccountId = null,
+  discountPct = 0, corporateAccountId = null, couponCode = null,
 }) {
   // Revalidar disponibilidad para evitar sobreventa
   const availability = await findAvailability({ propertyId, checkIn, checkOut, adults, children });
@@ -42,8 +42,16 @@ export async function createTentativeReservation({
   const quote = await buildQuote({ propertyId, roomTypeId, ratePlanId, checkIn, checkOut });
   const guestRecord = await upsertGuest({ propertyId, ...guest });
 
-  // Descuento negociado (cuenta corporativa / agencia): rebaja la tarifa y recalcula.
-  const pct = Math.min(Math.max(Number(discountPct) || 0, 0), 0.9);
+  // Cupón promocional (§36): resuelve el descuento contra el subtotal base.
+  let couponRes = null;
+  if (couponCode) {
+    const { resolveCoupon } = await import('./coupons.js');
+    couponRes = await resolveCoupon(propertyId, couponCode, { nights: quote.nights, subtotal: quote.subtotal });
+  }
+
+  // Descuento efectivo = mayor entre el negociado (corporativo) y el del cupón.
+  const negotiated = Math.min(Math.max(Number(discountPct) || 0, 0), 0.9);
+  const pct = Math.min(Math.max(negotiated, couponRes?.discountPct || 0), 0.9);
   const property = await prisma.property.findUnique({ where: { id: propertyId } });
   const nightlyRate = money(quote.nightlyRate * (1 - pct));
   const subtotal = money(nightlyRate * quote.nights);
@@ -66,6 +74,15 @@ export async function createTentativeReservation({
     },
     include: { guest: true },
   });
+
+  // Registra la redención del cupón para ROI.
+  if (couponRes) {
+    const { redeemCoupon } = await import('./coupons.js');
+    await redeemCoupon(couponRes.coupon.id, {
+      propertyId, reservationId: reservation.id, guestName: guestRecord.fullName,
+      amountDiscounted: money(quote.subtotal - subtotal), reservationTotal: total,
+    });
+  }
 
   await audit({ propertyId, actor, action: 'reservation.tentative_created', entity: 'Reservation', entityId: reservation.id, after: { code: reservation.code, total: reservation.total } });
   emitEvent('reservation.tentative_created', { propertyId, reservationId: reservation.id, code: reservation.code });

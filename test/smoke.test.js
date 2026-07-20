@@ -411,6 +411,71 @@ async function main() {
       assert.ok(!data.some(x => x.id === segmentId), 'ya no aparece');
     });
 
+    // ===== Cupones + ROI de campañas (§36) =====
+    let campaignForRoi, couponId, couponCode = 'VERANO20';
+    await test('crear una campaña y un cupón atribuido a ella', async () => {
+      const camp = await api('/api/marketing/campaigns', { method: 'POST', body: { propertyId, name: 'Promo verano', channel: 'email', audience: 'guests', message: 'Usa VERANO20' } });
+      campaignForRoi = camp.data.id;
+      const { status, data } = await api('/api/marketing/coupons', { method: 'POST', body: { propertyId, code: couponCode, discountType: 'percent', discountValue: 20, campaignId: campaignForRoi, description: '20% verano' } });
+      assert.equal(status, 201);
+      assert.equal(data.code, 'VERANO20');
+      couponId = data.id;
+    });
+
+    await test('no se permiten cupones con código duplicado', async () => {
+      const dup = await api('/api/marketing/coupons', { method: 'POST', body: { propertyId, code: 'verano20', discountType: 'percent', discountValue: 10 } });
+      assert.equal(dup.status, 400);
+    });
+
+    let couponResCode, baseTotal;
+    await test('reservar con el cupón aplica el descuento y registra la redención', async () => {
+      const ci = futureDay(40), co = futureDay(42);
+      const av = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1 } });
+      const rt = av.data[0];
+      // reserva sin cupón para tener la línea base
+      const plain = await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1, roomTypeId: rt.roomTypeId, guest: { fullName: 'Base Sin Cupón' } } });
+      baseTotal = plain.data.reservation.total;
+      // reserva con cupón
+      const withCoupon = await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1, roomTypeId: rt.roomTypeId, guest: { fullName: 'Con Cupón' }, couponCode } });
+      assert.equal(withCoupon.status, 201);
+      couponResCode = withCoupon.data.reservation.code;
+      assert.ok(withCoupon.data.reservation.subtotal < plain.data.reservation.subtotal, 'el subtotal con cupón es menor');
+      // 20% de descuento en la tarifa
+      assert.ok(Math.abs(withCoupon.data.reservation.nightlyRate - rt.baseRate * 0.8) < 1, 'aplica el 20%');
+    });
+
+    await test('un cupón inexistente es rechazado', async () => {
+      const ci = futureDay(40), co = futureDay(42);
+      const av = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1 } });
+      const res = await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1, roomTypeId: av.data[0].roomTypeId, guest: { fullName: 'X' }, couponCode: 'NOEXISTE' } });
+      assert.equal(res.status, 400);
+    });
+
+    await test('el overview de cupones muestra redenciones e ingresos atribuidos', async () => {
+      const { status, data } = await api(`/api/marketing/coupons?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      const c = data.coupons.find(x => x.id === couponId);
+      assert.equal(c.redemptions, 1, 'una redención registrada');
+      assert.ok(c.discountGiven > 0, 'registra el descuento otorgado');
+      assert.ok(c.revenueAttributed > 0, 'registra ingresos atribuidos');
+    });
+
+    await test('el ROI de la campaña cruza envíos y redenciones', async () => {
+      const { status, data } = await api(`/api/marketing/campaigns/${campaignForRoi}/roi`);
+      assert.equal(status, 200);
+      assert.equal(data.redemptions, 1);
+      assert.ok(data.revenueAttributed > 0);
+      assert.equal(data.coupons.length, 1, 'la campaña tiene su cupón');
+    });
+
+    await test('desactivar un cupón impide su uso', async () => {
+      await api(`/api/marketing/coupons/${couponId}`, { method: 'PATCH', body: { active: false } });
+      const ci = futureDay(40), co = futureDay(42);
+      const av = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1 } });
+      const res = await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1, roomTypeId: av.data[0].roomTypeId, guest: { fullName: 'Y' }, couponCode } });
+      assert.equal(res.status, 400);
+    });
+
     // ===== Encuestas post-estadía + quejas (§37) =====
     await test('el check-out crea una encuesta post-estadía', async () => {
       await settle(400);

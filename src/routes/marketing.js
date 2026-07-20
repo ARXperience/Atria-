@@ -3,10 +3,36 @@ import { Router } from 'express';
 import { prisma } from '../db.js';
 import { propertyScope, requirePermission } from '../middleware/auth.js';
 import { marketingOverview, buildAudience, createCampaign, sendCampaign, cancelCampaign, draftCampaignMessage } from '../services/marketing.js';
+import { createCoupon, listCoupons, setCouponActive, couponsOverview, campaignRoi } from '../services/coupons.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
 
 export const marketingRouter = Router();
+
+// ---- Cupones y ROI (§36) ----
+marketingRouter.get('/coupons', requirePermission('marketing.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await couponsOverview(req.query.propertyId));
+});
+
+marketingRouter.post('/coupons', requirePermission('marketing.manage'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try { res.status(201).json(await createCoupon({ ...req.body, user: req.user })); }
+  catch (err) { badRequest(res, err.message); }
+});
+
+marketingRouter.patch('/coupons/:id', requirePermission('marketing.manage'), async (req, res) => {
+  const c = await prisma.coupon.findUnique({ where: { id: req.params.id } });
+  if (!c || !propertyScope(req, c.propertyId)) return res.status(404).json({ error: 'Cupón no encontrado' });
+  try { res.json(await setCouponActive(c.id, req.body?.active, { user: req.user })); }
+  catch (err) { badRequest(res, err.message); }
+});
+
+marketingRouter.get('/campaigns/:id/roi', requirePermission('marketing.view'), async (req, res) => {
+  const c = await prisma.campaign.findUnique({ where: { id: req.params.id } });
+  if (!c || !propertyScope(req, c.propertyId)) return res.status(404).json({ error: 'Campaña no encontrada' });
+  res.json(await campaignRoi(c.id));
+});
 
 marketingRouter.get('/overview', requirePermission('marketing.view'), async (req, res) => {
   if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });

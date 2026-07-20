@@ -531,6 +531,7 @@
           <div><label>Teléfono</label><input id="gPhone"></div>
           <div><label>Documento</label><input id="gDoc"></div>
           <div><label>Nacionalidad (ISO)</label><input id="gNat" value="CO"></div>
+          <div><label>Cupón</label><input id="gCoupon" placeholder="opcional" style="text-transform:uppercase"></div>
           <button class="btn fit" onclick="_createRes()">Crear reserva + link de pago</button>
         </div>` : '<p class="muted mt">Sin disponibilidad para esos criterios.</p>';
       } catch (err) { toast(err.message, true); }
@@ -546,6 +547,7 @@
           body: {
             ...window._availData.body, roomTypeId: opt.roomTypeId, ratePlanId: planId || null,
             guest: { fullName: $('#gName').value, phone: $('#gPhone').value || null, documentNumber: $('#gDoc').value || null, nationality: $('#gNat').value || 'CO' },
+            couponCode: ($('#gCoupon')?.value || '').trim() || null,
           },
         });
         toast(`Reserva ${data.reservation.code} creada`);
@@ -1768,9 +1770,10 @@
   }
 
   async function viewMarketing() {
-    const [ov, segments] = await Promise.all([
+    const [ov, segments, coupons] = await Promise.all([
       get(`/marketing/overview?${pid()}`),
       get(`/crm/segments?${pid()}`).catch(() => []),
+      get(`/marketing/coupons?${pid()}`).catch(() => ({ coupons: [], totals: {} })),
     ]);
     const chLabel = { email: '✉️ Email', whatsapp: '💬 WhatsApp', sms: '📱 SMS' };
     const stLabel = { draft: 'Borrador', scheduled: 'Programada', sent: 'Enviada', cancelled: 'Cancelada' };
@@ -1792,6 +1795,36 @@
     };
     window._mkSend = async id => { if (!confirm('¿Enviar esta campaña ahora? Solo llegará a quienes dieron consentimiento.')) return; try { await api(`/marketing/campaigns/${id}/send`, { method: 'POST' }); toast('Campaña enviada'); render(); } catch (e) { toast(e.message, true); } };
     window._mkCancel = async id => { try { await api(`/marketing/campaigns/${id}/cancel`, { method: 'POST' }); toast('Campaña cancelada'); render(); } catch (e) { toast(e.message, true); } };
+    // Cupones
+    window._cpNew = () => {
+      const m = modal(`<h2>Nuevo cupón promocional</h2>
+        <div class="row">
+          <div><label>Código *</label><input id="cpCode" placeholder="VERANO20" style="text-transform:uppercase"></div>
+          <div><label>Tipo</label><select id="cpType"><option value="percent">Porcentaje</option><option value="fixed">Valor fijo</option></select></div>
+          <div><label>Valor *</label><input id="cpVal" type="number" placeholder="20"></div>
+        </div>
+        <label>Descripción</label><input id="cpDesc" placeholder="20% de descuento temporada baja">
+        <div class="row mt">
+          <div><label>Campaña (ROI)</label><select id="cpCamp"><option value="">(ninguna)</option>${ov.campaigns.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+          <div><label>Máx. redenciones</label><input id="cpMax" type="number" placeholder="ilimitado"></div>
+          <div><label>Mín. noches</label><input id="cpMin" type="number" value="1"></div>
+        </div>
+        <div class="row"><div><label>Válido hasta</label><input id="cpTo" type="date"></div></div>
+        <button class="btn mt" id="cpSave">Crear cupón</button>`);
+      m.querySelector('#cpSave').onclick = async () => {
+        try {
+          await api('/marketing/coupons', { method: 'POST', body: {
+            propertyId: state.propertyId, code: m.querySelector('#cpCode').value,
+            discountType: m.querySelector('#cpType').value, discountValue: +m.querySelector('#cpVal').value,
+            description: m.querySelector('#cpDesc').value, campaignId: m.querySelector('#cpCamp').value || null,
+            maxRedemptions: m.querySelector('#cpMax').value ? +m.querySelector('#cpMax').value : null,
+            minNights: +m.querySelector('#cpMin').value || 1, validTo: m.querySelector('#cpTo').value || null,
+          } });
+          toast('Cupón creado'); m.remove(); render();
+        } catch (err) { toast(err.message, true); }
+      };
+    };
+    window._cpToggle = async (id, active) => { try { await api(`/marketing/coupons/${id}`, { method: 'PATCH', body: { active } }); toast(active ? 'Cupón activado' : 'Cupón desactivado'); render(); } catch (e) { toast(e.message, true); } };
     window._mkDraft = async () => {
       const goal = $('#mkName').value || prompt('¿Cuál es el objetivo de la campaña? (p. ej. promo temporada, fidelizar, reactivar)') || '';
       try {
@@ -1844,6 +1877,26 @@
           <td>${sb(c.status === 'sent' ? 'done' : c.status === 'cancelled' ? 'cancelled' : c.status === 'scheduled' ? 'prepared' : 'pending')} ${stLabel[c.status] || esc(c.status)}</td>
           <td>${['draft', 'scheduled'].includes(c.status) ? `<button class="btn small" onclick="_mkSend('${c.id}')">Enviar</button> <button class="btn small ghost" onclick="_mkCancel('${c.id}')">Cancelar</button>` : ''}</td>
         </tr>`).join('')}</table>` : '<p class="muted">Aún no hay campañas. Crea la primera arriba.</p>'}
+      </div>
+
+      <div class="card mt"><div style="display:flex;justify-content:space-between;align-items:center">
+        <h3>🎟️ Cupones y ROI</h3><button class="btn small" onclick="_cpNew()">+ Nuevo cupón</button></div>
+        ${coupons.coupons.length ? `<div class="grid cols-4 mt">
+          <div class="kpi"><div class="label">Redenciones</div><div class="value">${coupons.totals.redemptions || 0}</div></div>
+          <div class="kpi"><div class="label">Descuento otorgado</div><div class="value">${cop(coupons.totals.discountGiven || 0)}</div></div>
+          <div class="kpi"><div class="label">Ingresos atribuidos</div><div class="value" style="color:var(--green)">${cop(coupons.totals.revenueAttributed || 0)}</div></div>
+          <div class="kpi"><div class="label">Ingreso neto</div><div class="value">${cop(coupons.totals.netRevenue || 0)}</div></div>
+        </div>
+        <table class="mt"><tr><th>Código</th><th>Descuento</th><th>Redenciones</th><th>Descuento dado</th><th>Ingresos</th><th>ROI</th><th>Estado</th><th></th></tr>
+        ${coupons.coupons.map(c => `<tr>
+          <td><b>${esc(c.code)}</b>${c.description ? `<div class="muted" style="font-size:11px">${esc(c.description)}</div>` : ''}</td>
+          <td>${c.discountType === 'percent' ? c.discountValue + '%' : cop(c.discountValue)}</td>
+          <td>${c.redemptions}${c.maxRedemptions ? `/${c.maxRedemptions}` : ''}</td>
+          <td>${cop(c.discountGiven)}</td><td>${cop(c.revenueAttributed)}</td>
+          <td>${c.roi == null ? '—' : `<b style="color:${c.roi >= 0 ? 'var(--green)' : 'var(--red)'}">${c.roi}%</b>`}</td>
+          <td>${badge(c.active ? 'Activo' : 'Inactivo', c.active ? 'green' : 'gray')}</td>
+          <td><button class="btn small ghost" onclick="_cpToggle('${c.id}',${!c.active})">${c.active ? 'Desactivar' : 'Activar'}</button></td>
+        </tr>`).join('')}</table>` : '<p class="muted">Sin cupones. Crea uno y compártelo en tus campañas para medir su retorno.</p>'}
       </div>`;
   }
 

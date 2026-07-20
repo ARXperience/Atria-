@@ -41,12 +41,12 @@ bookingRouter.post('/reservations', requirePermission('reservations.create'), as
   const params = parseSearch(req, res);
   if (!params) return;
   if (!propertyScope(req, params.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
-  const { roomTypeId, ratePlanId, guest, channel = 'direct', withPaymentLink = true, notes } = req.body;
+  const { roomTypeId, ratePlanId, guest, channel = 'direct', withPaymentLink = true, notes, couponCode } = req.body;
   if (!roomTypeId || !guest?.fullName) return badRequest(res, 'roomTypeId y guest.fullName son requeridos');
   try {
     const reservation = await createTentativeReservation({
       ...params, roomTypeId, ratePlanId: ratePlanId || null, guest, channel,
-      createdBy: req.user.id, notes,
+      createdBy: req.user.id, notes, couponCode: couponCode || null,
     });
     let paymentLink = null;
     if (withPaymentLink && reservation.depositRequired > 0) {

@@ -1507,6 +1507,42 @@ model Campaign {
   @@index([propertyId, status])
 }
 
+// Cupones promocionales con atribución a campaña para ROI (§36)
+model Coupon {
+  id             String   @id @default(cuid())
+  propertyId     String
+  code           String
+  description    String?
+  discountType   String   @default("percent") // percent | fixed
+  discountValue  Float     // % (0..100) o valor fijo COP
+  campaignId     String?   // atribución para ROI
+  maxRedemptions Int?
+  redemptions    Int      @default(0)
+  minNights      Int      @default(1)
+  validFrom      DateTime?
+  validTo        DateTime?
+  active         Boolean  @default(true)
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  redemptionLog  CouponRedemption[]
+
+  @@unique([propertyId, code])
+}
+
+model CouponRedemption {
+  id               String   @id @default(cuid())
+  couponId         String
+  coupon           Coupon   @relation(fields: [couponId], references: [id])
+  propertyId       String
+  reservationId    String?
+  guestName        String?
+  amountDiscounted Float    @default(0)
+  reservationTotal Float    @default(0)
+  createdAt        DateTime @default(now())
+
+  @@index([propertyId, couponId])
+}
+
 // ===== Reputación & reseñas (§37) =====
 model Review {
   id            String   @id @default(cuid())

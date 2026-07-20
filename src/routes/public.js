@@ -75,7 +75,7 @@ publicRouter.post('/hotel/:propertyId/availability', async (req, res) => {
 publicRouter.post('/hotel/:propertyId/book', async (req, res) => {
   const property = await prisma.property.findUnique({ where: { id: req.params.propertyId } });
   if (!property) return res.status(404).json({ error: 'Sede no encontrada' });
-  const { checkIn, checkOut, adults = 2, children = 0, roomTypeId, ratePlanId, guest } = req.body || {};
+  const { checkIn, checkOut, adults = 2, children = 0, roomTypeId, ratePlanId, guest, couponCode } = req.body || {};
   const ci = parseDay(checkIn), co = parseDay(checkOut);
   if (!ci || !co || co <= ci) return res.status(400).json({ error: 'Fechas inválidas' });
   if (!roomTypeId || !guest?.fullName) return res.status(400).json({ error: 'Habitación y nombre del huésped requeridos' });
@@ -85,7 +85,7 @@ publicRouter.post('/hotel/:propertyId/book', async (req, res) => {
     const reservation = await createTentativeReservation({
       propertyId: property.id, guest: { fullName: guest.fullName, phone: guest.phone || null, email: guest.email || null },
       roomTypeId, ratePlanId: ratePlanId || null, checkIn: ci, checkOut: co,
-      adults: +adults, children: +children, channel: 'web', createdBy: 'web',
+      adults: +adults, children: +children, channel: 'web', createdBy: 'web', couponCode: couponCode || null,
     });
     const link = await createPaymentLink({ propertyId: property.id, reservationId: reservation.id, concept: `Anticipo reserva ${reservation.code}`, amount: reservation.depositRequired });
     res.status(201).json({ code: reservation.code, total: reservation.total, deposit: reservation.depositRequired, paymentUrl: link.url });
