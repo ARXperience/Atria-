@@ -1098,6 +1098,47 @@ async function main() {
       assert.equal(full.data.status, 'cancelled');
     });
 
+    // ===== IA que ejecuta con vista previa (§41/§55.6) =====
+    await test('el copiloto interpreta un descuento y devuelve vista previa de impacto', async () => {
+      const full = await api(`/api/reservations/${roomServiceResvId}`);
+      const code = full.data.code;
+      const { status, data } = await api('/api/assistant/internal', { method: 'POST', body: { propertyId, text: `aplica un descuento de 30000 a la reserva ${code} por demora en el check-in` } });
+      assert.equal(status, 200);
+      assert.equal(data.kind, 'action');
+      assert.equal(data.action.type, 'discount');
+      assert.equal(data.action.payload.amount, 30000);
+      assert.ok(data.preview.impact.length >= 1, 'la vista previa lista el impacto');
+      assert.equal(data.preview.requiresApproval, false, 'el gerente puede ejecutar directamente');
+    });
+
+    await test('el gerente confirma y el copiloto ejecuta el descuento de inmediato', async () => {
+      const full = await api(`/api/reservations/${roomServiceResvId}`);
+      const code = full.data.code;
+      const prev = await api('/api/assistant/internal', { method: 'POST', body: { propertyId, text: `descuento de 15000 a ${code}` } });
+      const exec = await api('/api/assistant/action/execute', { method: 'POST', body: { propertyId, action: prev.data.action } });
+      assert.equal(exec.status, 200);
+      assert.equal(exec.data.executed, true);
+      const after = await api(`/api/reservations/${roomServiceResvId}`);
+      assert.ok(after.data.folio.charges.some(c => c.concept === 'descuento' && c.amount === -15000), 'el descuento quedó en el folio');
+    });
+
+    await test('un rol sin autoridad envía la acción del copiloto a aprobación', async () => {
+      // Front desk propone un descuento → debe requerir aprobación de gerente.
+      const fd = await api('/api/auth/login', { method: 'POST', body: { email: 'recepcion@atria.co', password: 'atria2026' } }).catch(() => null);
+      if (!fd?.data?.token) return; // si no existe el usuario demo, se omite
+      const full = await api(`/api/reservations/${roomServiceResvId}`);
+      const code = full.data.code;
+      const headers = { 'content-type': 'application/json', authorization: `Bearer ${fd.data.token}` };
+      const prevRes = await fetch(`${BASE}/api/assistant/internal`, { method: 'POST', headers, body: JSON.stringify({ propertyId, text: `descuento de 10000 a ${code}` }) });
+      const prev = await prevRes.json();
+      assert.equal(prev.kind, 'action');
+      assert.equal(prev.preview.requiresApproval, true);
+      const execRes = await fetch(`${BASE}/api/assistant/action/execute`, { method: 'POST', headers, body: JSON.stringify({ propertyId, action: prev.action }) });
+      const exec = await execRes.json();
+      assert.equal(exec.executed, false);
+      assert.ok(exec.pendingApproval?.id, 'crea una solicitud de aprobación');
+    });
+
     await test('no se puede cargar room service a una habitación sin check-in', async () => {
       const ord = await api('/api/pos/orders', { method: 'POST', body: { propertyId, type: 'room_service', reservationId: reservation.id, items: [{ menuItemId, qty: 1 }] } });
       const charge = await api(`/api/pos/orders/${ord.data.id}/charge`, { method: 'POST' });

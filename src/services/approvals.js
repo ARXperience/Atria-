@@ -127,6 +127,14 @@ const executors = {
   },
 };
 
+// Ejecuta directamente una acción sensible (usada por el copiloto cuando el
+// usuario tiene la autoridad para ejecutarla sin pasar por otra persona).
+export async function executeAction(type, payload) {
+  const executor = executors[type];
+  if (!executor) throw new Error(`Acción no ejecutable: ${type}`);
+  return executor(payload);
+}
+
 export async function decideApproval(requestId, { approve, user, note = null }) {
   const request = await prisma.approvalRequest.findUnique({ where: { id: requestId } });
   if (!request) throw new Error('Solicitud no encontrada');

@@ -177,5 +177,8 @@ function helpFor(role) {
   if (hasPermission(role, 'fontur.view')) extra.push('la contribución FONTUR');
   if (hasPermission(role, 'marketing.view')) extra.push('el alcance de marketing');
   if (hasPermission(role, 'hr.view')) extra.push('empleados y nómina');
-  return `Soy tu copiloto interno 🧭. Puedo consultarte, por ejemplo:\n${[...base, ...extra].map((x) => `• ${x}`).join('\n')}\n\n¿Qué necesitas?`;
+  const actions = hasPermission(role, 'reservations.edit')
+    ? '\n\nTambién puedo *ejecutar acciones con vista previa*: aplicar un descuento, cambiar la tarifa, exonerar el anticipo o cancelar una reserva (ej: "aplica un descuento de 50000 a ATR-2026-1234"). Verás el impacto antes de confirmar.'
+    : '';
+  return `Soy tu copiloto interno 🧭. Puedo consultarte, por ejemplo:\n${[...base, ...extra].map((x) => `• ${x}`).join('\n')}${actions}\n\n¿Qué necesitas?`;
 }

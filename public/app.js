@@ -869,6 +869,8 @@
       FRONTDESK: ['Llegadas y salidas de hoy', 'Estado de las habitaciones', 'Aprobaciones pendientes'],
       ACCOUNTING: ['Caja del día', 'Aprobaciones pendientes'],
       HR: ['Empleados y nómina', 'Estado de las habitaciones'],
+      MANAGER: ['¿Cómo vamos hoy?', 'Aprobaciones pendientes', 'Aplica un descuento de 50000 a ATR-2026-…'],
+      OWNER: ['¿Cómo vamos hoy?', 'Resumen financiero', 'Aplica un descuento de 50000 a ATR-2026-…'],
     }[role] || ['Estado de las habitaciones', 'Llegadas y salidas de hoy', 'Aprobaciones pendientes'];
 
     setTimeout(() => {
@@ -884,13 +886,40 @@
         if (on && !t) { t = document.createElement('div'); t.className = 'typing'; t.id = 'copTyping'; t.innerHTML = '<span></span><span></span><span></span>'; body.appendChild(t); body.scrollTop = body.scrollHeight; }
         if (!on && t) t.remove();
       };
+      const appendHTML = html => {
+        const el = document.createElement('div'); el.className = 'msg in'; el.innerHTML = html;
+        body.appendChild(el); body.scrollTop = body.scrollHeight; return el;
+      };
       const ask = async text => {
         if (!text.trim()) return;
         append(text, 'out'); typing(true);
         try {
           const { data } = await api('/assistant/internal', { method: 'POST', body: { propertyId: state.propertyId, text } });
-          typing(false); append(data.reply, 'in');
+          typing(false);
+          if (data.kind === 'action') { renderPreview(data); return; }
+          append(data.reply, 'in');
         } catch (err) { typing(false); append('No pude procesar eso: ' + err.message, 'in'); }
+      };
+      // Vista previa de impacto de una acción propuesta por el copiloto (§55.6).
+      const renderPreview = data => {
+        const { action, preview } = data;
+        const rows = preview.impact.map(i => `<tr><td class="muted" style="padding:2px 10px 2px 0">${esc(i.label)}</td><td>${esc(String(i.before))}</td><td style="color:var(--accent)">→ ${esc(String(i.after))}</td></tr>`).join('');
+        const el = appendHTML(`
+          <div style="font-weight:600;margin-bottom:6px">🤖 ${esc(preview.title)}</div>
+          <table style="font-size:12.5px;margin-bottom:8px">${rows}</table>
+          <div class="muted" style="font-size:11.5px;margin-bottom:8px">${esc(preview.note)}</div>
+          <div class="row" style="gap:8px">
+            <button class="btn small fit" id="copRun">${preview.requiresApproval ? 'Enviar a aprobación' : 'Ejecutar'}</button>
+            <button class="btn small secondary fit" id="copCancel">Cancelar</button>
+          </div>`);
+        el.querySelector('#copCancel').onclick = () => { el.querySelector('.row').innerHTML = '<span class="muted" style="font-size:12px">Acción descartada.</span>'; };
+        el.querySelector('#copRun').onclick = async () => {
+          el.querySelector('#copRun').disabled = true;
+          try {
+            const { data: r } = await api('/assistant/action/execute', { method: 'POST', body: { propertyId: state.propertyId, action } });
+            el.querySelector('.row').innerHTML = `<span style="color:var(--good,#4ade80);font-size:12.5px">${r.executed ? '✅ Acción ejecutada.' : '⏳ Enviada a aprobación de ' + esc(action.requiredRole) + '.'}</span>`;
+          } catch (err) { el.querySelector('#copRun').disabled = false; toast(err.message, true); }
+        };
       };
       window._copAsk = ask;
       $('#copSend').onclick = () => { const v = $('#copText').value; $('#copText').value = ''; ask(v); };
