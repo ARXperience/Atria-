@@ -4,12 +4,23 @@
   let state = {
     token: localStorage.getItem('atria_token'),
     user: JSON.parse(localStorage.getItem('atria_user') || 'null'),
+    company: JSON.parse(localStorage.getItem('atria_company') || 'null'),
     properties: JSON.parse(localStorage.getItem('atria_props') || '[]'),
     propertyId: localStorage.getItem('atria_prop') || null,
     view: location.hash.slice(1) || 'dashboard',
     inbox: { convoId: null, timer: null },
     wa: { timer: null },
   };
+
+  // White-label (§55.1): aplica color y nombre comercial del tenant.
+  function applyBranding(company) {
+    if (!company) return;
+    if (company.brandColor && /^#[0-9a-fA-F]{3,8}$/.test(company.brandColor)) {
+      document.documentElement.style.setProperty('--accent', company.brandColor);
+      document.documentElement.style.setProperty('--accent-hi', company.brandColor);
+    }
+  }
+  applyBranding(state.company);
 
   // ---------- utilidades ----------
   const $ = sel => document.querySelector(sel);
@@ -133,15 +144,24 @@
         <button class="btn mt" style="width:100%" id="loginBtn">Ingresar</button>
         <p class="muted mt" style="font-size:12px;text-align:center">Demo: gerente@atria.co / atria2026</p>
       </div></div>`;
-    const doLogin = async () => {
+    const doLogin = async (code) => {
       try {
-        const { data } = await api('/auth/login', { method: 'POST', body: { email: $('#email').value, password: $('#password').value } });
-        state.token = data.token; state.user = data.user; state.properties = data.properties;
+        const body = { email: $('#email').value, password: $('#password').value };
+        if (code) body.code = code;
+        const { data } = await api('/auth/login', { method: 'POST', body });
+        if (data.twoFactorRequired) {
+          const c = prompt('Verificación en dos pasos: ingresa el código de 6 dígitos de tu app autenticadora.');
+          if (c && c.trim()) return doLogin(c.trim());
+          return;
+        }
+        state.token = data.token; state.user = data.user; state.properties = data.properties; state.company = data.company;
         state.propertyId = data.properties[0]?.id || null;
         localStorage.setItem('atria_token', data.token);
         localStorage.setItem('atria_user', JSON.stringify(data.user));
+        localStorage.setItem('atria_company', JSON.stringify(data.company || null));
         localStorage.setItem('atria_props', JSON.stringify(data.properties));
         localStorage.setItem('atria_prop', state.propertyId || '');
+        applyBranding(data.company);
         state.justLoggedIn = true;
         render();
       } catch (err) { toast(err.message, true); }
@@ -213,7 +233,7 @@
         <div class="nav-scrim" id="navScrim"></div>
         <div class="sidebar">
           <div class="brand">ATR<b>IA</b></div>
-          <div class="brand-sub">HOSPITALITY OS</div>
+          <div class="brand-sub">${state.company?.commercialName ? esc(state.company.commercialName) : 'HOSPITALITY OS'}</div>
           <nav class="nav">
             ${NAV.filter(([id]) => id !== 'saasadmin' || state.user.isSuperAdmin).map(([id, label]) => id === 'sep'
               ? `<div class="sep">${label}</div>`
@@ -2566,6 +2586,15 @@
     };
     window._revokeSession = async id => { try { await api(`/auth/sessions/${id}/revoke`, { method: 'POST' }); toast('Sesión cerrada'); render(); } catch (e) { toast(e.message, true); } };
     window._revokeOthers = async () => { if (!confirm('¿Cerrar todas las demás sesiones?')) return; try { await api('/auth/sessions/revoke-others', { method: 'POST' }); toast('Otras sesiones cerradas'); render(); } catch (e) { toast(e.message, true); } };
+    window._saveBrand = async () => {
+      try {
+        const c = await api('/saas/branding', { method: 'POST', body: { commercialName: $('#brandName').value || null, brandColor: $('#brandColor').value || null } });
+        state.company = { ...(state.company || {}), commercialName: c.commercialName, brandColor: c.brandColor };
+        localStorage.setItem('atria_company', JSON.stringify(state.company));
+        applyBranding(state.company);
+        toast('Marca actualizada'); render();
+      } catch (e) { toast(e.message, true); }
+    };
     const prop = props.find(p => p.id === state.propertyId) || props[0];
     window._addUser = async () => {
       try {
@@ -2615,6 +2644,14 @@
           </div>
         </div>
       </div>
+      ${['OWNER', 'MANAGER'].includes(state.user.role) ? `<div class="card"><h3>🎨 Marca (white-label)</h3>
+        <p class="muted" style="font-size:12px">Personaliza el nombre comercial y el color de acento del panel para tu hotel/grupo.</p>
+        <div class="row">
+          <div><label>Nombre comercial</label><input id="brandName" value="${esc(state.company?.commercialName || '')}" placeholder="HOSPITALITY OS"></div>
+          <div><label>Color de acento</label><input id="brandColor" type="color" value="${esc(state.company?.brandColor || '#d8b064')}" style="height:42px;padding:3px"></div>
+          <button class="btn fit" onclick="_saveBrand()">Guardar marca</button>
+        </div>
+      </div>` : ''}
       <div class="card"><h3>Sede: ${esc(prop?.name || '')}</h3>
         <p class="muted">RNT: ${esc(prop?.rnt || 'sin registrar')} · ${prop?._count?.rooms ?? '—'} habitaciones · Webchat público: <a style="color:var(--accent2)" href="/chat.html?propertyId=${prop?.id}" target="_blank">/chat.html</a></p>
       </div>

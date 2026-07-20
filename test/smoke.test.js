@@ -1655,6 +1655,21 @@ async function main() {
       assert.equal(ok.status, 200, 'tras reactivar, la API responde de nuevo');
     });
 
+    // ===== White-label (§55.1) =====
+    await test('el administrador configura la marca y el login la devuelve', async () => {
+      const r = await api('/api/saas/branding', { method: 'POST', body: { commercialName: 'Grupo Hotelero Andes', brandColor: '#3b82f6' } });
+      assert.equal(r.status, 200);
+      const login = await api('/api/auth/login', { method: 'POST', body: { email: 'gerente@atria.co', password: 'atria2026' } });
+      assert.equal(login.data.company.commercialName, 'Grupo Hotelero Andes');
+      assert.equal(login.data.company.brandColor, '#3b82f6');
+    });
+
+    await test('un rol no administrador no puede cambiar la marca', async () => {
+      const { data: login } = await api('/api/auth/login', { method: 'POST', body: { email: 'housekeeping@atria.co', password: 'atria2026' } });
+      const res = await fetch(`${BASE}/api/saas/branding`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${login.token}` }, body: JSON.stringify({ commercialName: 'X' }) });
+      assert.equal(res.status, 403);
+    });
+
     // ===== Facturación del software SaaS (§55.1) =====
     await test('el superadmin emite facturas y el tenant las ve', async () => {
       const { data: sa } = await api('/api/auth/login', { method: 'POST', body: { email: 'superadmin@atria.co', password: 'atria2026' } });

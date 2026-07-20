@@ -18,6 +18,11 @@ async function accessibleProperties(user) {
   });
 }
 
+async function companyBranding(companyId) {
+  const c = await prisma.company.findUnique({ where: { id: companyId }, select: { name: true, commercialName: true, brandColor: true, logoUrl: true } });
+  return c ? { name: c.name, commercialName: c.commercialName, brandColor: c.brandColor, logoUrl: c.logoUrl } : null;
+}
+
 async function issueSession(user, req) {
   const jti = crypto.randomUUID();
   await prisma.session.create({ data: { userId: user.id, jti, ip: req.ip || null, userAgent: (req.headers['user-agent'] || '').slice(0, 200) || null } });
@@ -41,6 +46,7 @@ authRouter.post('/login', async (req, res) => {
   res.json({
     token: await issueSession(user, req),
     user: { id: user.id, name: user.name, email: user.email, role: user.role, twoFactorEnabled: user.twoFactorEnabled, isSuperAdmin: user.isSuperAdmin },
+    company: await companyBranding(user.companyId),
     properties: await accessibleProperties(user),
   });
 });
@@ -48,6 +54,7 @@ authRouter.post('/login', async (req, res) => {
 authRouter.get('/me', authRequired, async (req, res) => {
   res.json({
     user: { id: req.user.id, name: req.user.name, email: req.user.email, role: req.user.role, twoFactorEnabled: req.user.twoFactorEnabled, isSuperAdmin: req.user.isSuperAdmin },
+    company: await companyBranding(req.user.companyId),
     properties: await accessibleProperties(req.user),
   });
 });
