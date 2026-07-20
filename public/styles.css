@@ -406,15 +406,72 @@ code { background: var(--bg-elev); padding: 1px 6px; border-radius: 5px; font-si
 /* ============================================================
    Responsive
    ============================================================ */
-@media (max-width: 900px) {
-  .app { flex-direction: column; }
-  .sidebar { width: 100%; height: auto; position: static; flex-direction: row; overflow-x: auto; align-items: center; padding: 12px; }
-  .sidebar .brand, .sidebar .brand-sub, .sidebar-footer { display: none; }
-  .nav { flex-direction: row; }
-  .nav .sep { display: none; }
+
+/* Botón hamburguesa y velo del drawer: ocultos en escritorio */
+.mobile-bar { display: none; }
+.nav-scrim { display: none; }
+
+/* Tablet: densifica rejillas y stackea inbox */
+@media (max-width: 1024px) {
+  .main { padding: 22px 22px 60px; }
+  .grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .inbox { grid-template-columns: 1fr; height: auto; }
-  .main { padding: 16px; }
 }
+
+/* Móvil: sidebar se convierte en drawer lateral con hamburguesa */
+@media (max-width: 760px) {
+  /* Barra superior móvil con logo + botón de menú */
+  .mobile-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 40;
+    padding: 10px 14px; background: var(--bg-elev);
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .mobile-bar .brand { font-size: 18px; letter-spacing: 3px; font-weight: 800; }
+  .mobile-bar .menu-btn {
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    width: 42px; height: 42px; border-radius: var(--r-sm); font-size: 20px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .mobile-bar .menu-btn:active { transform: scale(.94); }
+
+  .app { flex-direction: column; }
+
+  /* Drawer: fuera de pantalla por defecto, entra al abrir */
+  .sidebar {
+    position: fixed; top: 0; left: 0; height: 100dvh; width: 264px; max-width: 84vw;
+    z-index: 60; transform: translateX(-100%);
+    transition: transform var(--dur-2) var(--ease);
+    box-shadow: 2px 0 24px rgba(0,0,0,.45);
+    padding-top: 18px;
+  }
+  .app.nav-open .sidebar { transform: translateX(0); }
+
+  /* Velo oscuro detrás del drawer abierto */
+  .app.nav-open .nav-scrim {
+    display: block; position: fixed; inset: 0; z-index: 55;
+    background: rgba(0,0,0,.5); animation: fadeIn var(--dur-1) var(--ease-out) both;
+  }
+
+  .nav a { padding: 12px 14px; font-size: 15px; }   /* objetivos táctiles más grandes */
+  .main { padding: 14px 14px 60px; max-width: 100%; }
+  .topbar h1 { font-size: 22px; }
+
+  /* Rejillas a una/dos columnas */
+  .grid.cols-2, .grid.cols-4 { grid-template-columns: 1fr; }
+
+  /* Tablas: scroll horizontal contenido, sin desbordar el body */
+  .card > table, .main > .card table, table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+
+  /* Formularios en fila se apilan */
+  .row > * { flex: 1 1 100%; min-width: 0; }
+  .row > .fit, .row > button { flex: 1 1 100%; }
+
+  /* Modales ocupan casi toda la pantalla */
+  .modal { width: 94vw; max-width: 94vw; }
+}
+
+@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
 
 /* Accesibilidad: respeta reduce-motion */
 @media (prefers-reduced-motion: reduce) {

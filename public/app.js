@@ -201,7 +201,12 @@
 
   function renderShell(contentHtml, title) {
     root.innerHTML = `
-      <div class="app">
+      <div class="app" id="appShell">
+        <div class="mobile-bar">
+          <div class="brand">ATR<b>IA</b></div>
+          <button class="menu-btn" id="menuBtn" aria-label="Abrir menú">☰</button>
+        </div>
+        <div class="nav-scrim" id="navScrim"></div>
         <div class="sidebar">
           <div class="brand">ATR<b>IA</b></div>
           <div class="brand-sub">HOSPITALITY OS</div>
@@ -229,6 +234,12 @@
       </div>`;
     $('#logoutLink').onclick = e => { e.preventDefault(); logout(); };
     $('#propSel').onchange = e => { state.propertyId = e.target.value; localStorage.setItem('atria_prop', state.propertyId); render(); };
+    // Drawer móvil: abrir/cerrar el menú lateral
+    const shell = $('#appShell');
+    const closeNav = () => shell.classList.remove('nav-open');
+    $('#menuBtn').onclick = () => shell.classList.toggle('nav-open');
+    $('#navScrim').onclick = closeNav;
+    shell.querySelectorAll('.nav a').forEach(a => a.addEventListener('click', closeNav));
   }
 
   function modal(html) {
