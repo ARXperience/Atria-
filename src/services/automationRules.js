@@ -47,17 +47,37 @@ function conditionsMatch(conditions, payload) {
   });
 }
 
-async function runAction(rule, payload) {
-  const params = parse(rule.actionParams, {});
+// Los pasos de una regla: usa la secuencia multi-paso si existe, o cae al modo
+// simple de una sola acción (compatibilidad hacia atrás).
+export function ruleSteps(rule) {
+  const steps = parse(rule.steps, null);
+  if (Array.isArray(steps) && steps.length) return steps;
+  return [{ type: rule.actionType, params: parse(rule.actionParams, {}) }];
+}
+
+// Ejecuta un paso individual de la regla.
+async function runStep(step, rule, payload) {
+  const params = step.params || {};
   const propertyId = payload.propertyId || rule.propertyId;
-  if (rule.actionType === 'notify') {
+  if (step.type === 'notify') {
     await notify({ propertyId, audienceRole: params.role || 'MANAGER', title: params.title || rule.name, body: params.body || null, severity: params.severity || 'info', entity: rule.trigger, entityId: payload.entityId || payload.reservationId || null });
-  } else if (rule.actionType === 'housekeeping_task') {
+  } else if (step.type === 'housekeeping_task') {
     const roomId = payload.roomId || null;
     if (roomId) await prisma.housekeepingTask.create({ data: { propertyId, roomId, type: 'auto_rule', priority: params.priority || 'normal', notes: params.notes || `Regla: ${rule.name}` } });
     else await notify({ propertyId, audienceRole: 'HOUSEKEEPING', title: `Regla ${rule.name}`, body: params.notes || 'Tarea automática (sin habitación en el evento).' });
-  } else if (rule.actionType === 'log') {
+  } else if (step.type === 'log') {
     await audit({ propertyId, actor: 'system', action: 'automation.rule_fired', entity: 'AutomationRule', entityId: rule.id, reason: params.note || rule.name });
+  }
+}
+
+// Ejecuta todos los pasos de la regla en orden. Un paso que falla no impide
+// los siguientes (registra el error y continúa).
+async function runAction(rule, payload) {
+  const steps = ruleSteps(rule);
+  for (const step of steps) {
+    if (!ACTION_TYPES.has(step.type)) continue;
+    try { await runStep(step, rule, payload); }
+    catch (err) { logger.error({ err, rule: rule.id, step: step.type }, 'automation step failed'); }
   }
 }
 
@@ -88,12 +108,26 @@ export function registerRuleEngine() {
   logger.info('automation rule engine registered');
 }
 
-export async function createRule({ propertyId, name, trigger, conditions = [], actionType, actionParams = {}, createdBy = null }) {
+export async function createRule({ propertyId, name, trigger, conditions = [], actionType, actionParams = {}, steps = null, createdBy = null }) {
   if (!name) throw new Error('name requerido');
   if (!TRIGGER_EVENTS.has(trigger)) throw new Error('Disparador inválido');
+  // Modo multi-paso: una secuencia de acciones válidas.
+  if (Array.isArray(steps) && steps.length) {
+    const clean = steps.map((s) => {
+      if (!ACTION_TYPES.has(s.type)) throw new Error(`Acción inválida en un paso: ${s.type}`);
+      return { type: s.type, params: s.params || {} };
+    });
+    return prisma.automationRule.create({
+      data: {
+        propertyId, name, trigger, conditions: JSON.stringify(conditions || []),
+        actionType: 'multi', actionParams: null, steps: JSON.stringify(clean), createdBy,
+      },
+    });
+  }
+  // Modo simple: una sola acción.
   if (!ACTION_TYPES.has(actionType)) throw new Error('Acción inválida');
   return prisma.automationRule.create({
-    data: { propertyId, name, trigger, conditions: JSON.stringify(conditions || []), actionType, actionParams: JSON.stringify(actionParams || {}), createdBy },
+    data: { propertyId, name, trigger, conditions: JSON.stringify(conditions || []), actionType, actionParams: JSON.stringify(actionParams || {}), steps: null, createdBy },
   });
 }
 
@@ -136,6 +170,8 @@ export async function automationsOverview(propertyId) {
     total: rules.length,
     active: rules.filter(r => r.enabled).length,
     totalRuns: rules.reduce((s, r) => s + r.runCount, 0),
-    rules, triggers: TRIGGERS, actions: ACTIONS,
+    // Enriquece cada regla con su secuencia de pasos resuelta para la UI.
+    rules: rules.map(r => ({ ...r, stepList: ruleSteps(r) })),
+    triggers: TRIGGERS, actions: ACTIONS,
   };
 }

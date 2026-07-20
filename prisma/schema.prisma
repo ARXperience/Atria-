@@ -1738,8 +1738,9 @@ model AutomationRule {
   name        String
   trigger     String   // nombre del evento de dominio (reservation.confirmed…)
   conditions  String?  // JSON: [{field, op, value}]
-  actionType  String   // notify | housekeeping_task | log
-  actionParams String? // JSON con parámetros de la acción
+  actionType  String   // notify | housekeeping_task | log | multi
+  actionParams String? // JSON con parámetros de la acción (modo simple)
+  steps       String?  // JSON: [{type, params}] — secuencia multi-paso (§40)
   enabled     Boolean  @default(true)
   runCount    Int      @default(0)
   lastRunAt   DateTime?

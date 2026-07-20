@@ -2838,21 +2838,41 @@
       $('#auCondFields').innerHTML = fields.map(f => `<option value="${f}">`).join('');
       $('#auCondHint').textContent = fields.length ? `Campos: ${fields.join(', ')}` : 'Este disparador no expone campos para filtrar.';
     };
-    window._auCreate = async () => {
+    // Secuencia de pasos en construcción (multi-paso).
+    if (!window._auSteps) window._auSteps = [];
+    const renderSteps = () => {
+      const box = $('#auStepList'); if (!box) return;
+      box.innerHTML = window._auSteps.length
+        ? window._auSteps.map((s, i) => `<div class="row" style="justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+            <div><b>${i + 1}. ${esc(actLabel[s.type] || s.type)}</b> <span class="muted" style="font-size:11.5px">${esc(Object.entries(s.params).map(([k, v]) => `${k}: ${v}`).join(', ') || 'sin parámetros')}</span></div>
+            <button class="btn small ghost danger" onclick="_auStepDel(${i})">✕</button></div>`).join('')
+        : '<p class="muted" style="font-size:12px">Sin pasos aún. Agrega al menos uno.</p>';
+    };
+    window._auStepAdd = () => {
       const type = $('#auAction').value;
       const act = ov.actions.find(a => a.type === type);
       const params = {};
       for (const p of act?.params || []) { const v = document.getElementById(`aup_${p.key}`)?.value; if (v) params[p.key] = v; }
+      window._auSteps.push({ type, params });
+      renderSteps();
+    };
+    window._auStepDel = i => { window._auSteps.splice(i, 1); renderSteps(); };
+    window._auCreate = async () => {
+      // Si no se agregó ningún paso explícito, usa la acción seleccionada como paso único.
+      if (!window._auSteps.length) _auStepAdd();
+      const steps = window._auSteps.slice();
       const conditions = [];
       const cField = $('#auCondField').value.trim();
       if (cField) conditions.push({ field: cField, op: $('#auCondOp').value, value: $('#auCondVal').value });
-      try { await api('/automations/rules', { method: 'POST', body: { propertyId: state.propertyId, name: $('#auName').value, trigger: $('#auTrigger').value, conditions, actionType: type, actionParams: params } }); toast('Regla creada'); render(); }
-      catch (e) { toast(e.message, true); }
+      try {
+        await api('/automations/rules', { method: 'POST', body: { propertyId: state.propertyId, name: $('#auName').value, trigger: $('#auTrigger').value, conditions, steps } });
+        window._auSteps = []; toast('Regla creada'); render();
+      } catch (e) { toast(e.message, true); }
     };
     window._auToggle = async (id, enabled) => { try { await api(`/automations/rules/${id}`, { method: 'PATCH', body: { enabled } }); toast(enabled ? 'Regla activada' : 'Regla pausada'); render(); } catch (e) { toast(e.message, true); } };
     window._auTest = async id => { try { const r = await api(`/automations/rules/${id}/test`, { method: 'POST', body: { payload: {} } }); toast(r.executed ? 'Regla ejecutada (prueba) ✅' : 'Las condiciones no coincidieron'); render(); } catch (e) { toast(e.message, true); } };
     window._auDel = async id => { if (!confirm('¿Eliminar esta regla?')) return; try { await api(`/automations/rules/${id}`, { method: 'DELETE' }); toast('Regla eliminada'); render(); } catch (e) { toast(e.message, true); } };
-    setTimeout(() => { animateCounts(); if ($('#auAction')) _auActChange(); if ($('#auTrigger')) _auTrigChange(); }, 0);
+    setTimeout(() => { animateCounts(); if ($('#auAction')) _auActChange(); if ($('#auTrigger')) _auTrigChange(); renderSteps(); }, 0);
     return `
       <div class="grid cols-4">
         <div class="kpi"><div class="label">Reglas</div><div class="value"><span data-count="${ov.total}">0</span></div></div>
@@ -2871,13 +2891,20 @@
       </div>` : ''}
 
       <div class="card mt"><h3>Nueva regla</h3>
-        <p class="muted">Cuando ocurra un <b>disparador</b>, ejecuta una <b>acción</b>. Solo acciones de bajo riesgo; las sensibles siguen exigiendo aprobación humana.</p>
+        <p class="muted">Cuando ocurra un <b>disparador</b>, ejecuta una <b>secuencia de acciones</b> en orden. Solo acciones de bajo riesgo; las sensibles siguen exigiendo aprobación humana.</p>
         <div class="row mt">
-          <div><label>Nombre</label><input id="auName" placeholder="Avisar a ventas si reserva abandonada"></div>
+          <div><label>Nombre</label><input id="auName" placeholder="Check-out → limpieza + aviso a gerencia"></div>
           <div><label>Cuando… (disparador)</label><select id="auTrigger" onchange="_auTrigChange()">${ov.triggers.map(t => `<option value="${t.event}">${esc(t.label)}</option>`).join('')}</select></div>
-          <div><label>Entonces… (acción)</label><select id="auAction" onchange="_auActChange()">${ov.actions.map(a => `<option value="${a.type}">${esc(a.label)}</option>`).join('')}</select></div>
         </div>
-        <div class="row mt" id="auParams"></div>
+        <div class="mt" style="padding-top:8px;border-top:1px dashed var(--border)">
+          <label>Pasos de la secuencia</label>
+          <div class="row" style="align-items:flex-end">
+            <div><label style="font-size:11px">Acción</label><select id="auAction" onchange="_auActChange()">${ov.actions.map(a => `<option value="${a.type}">${esc(a.label)}</option>`).join('')}</select></div>
+            <div style="flex:2" class="row" id="auParams"></div>
+            <button class="btn small secondary fit" onclick="_auStepAdd()">+ Agregar paso</button>
+          </div>
+          <div id="auStepList" class="mt" style="background:var(--surface-2);border-radius:var(--r-sm);padding:8px 12px"></div>
+        </div>
         <div class="mt" style="padding-top:8px;border-top:1px dashed var(--border)">
           <label>Solo si… (condición opcional)</label>
           <div class="row">
@@ -2892,7 +2919,7 @@
 
       <div class="card mt"><h3>Reglas configuradas</h3>
         ${ov.rules.length ? `<table><tr><th>Regla</th><th>Cuando</th><th>Entonces</th><th>Ejecuciones</th><th>Estado</th><th></th></tr>
-        ${ov.rules.map(r => { const cond = (() => { try { const c = JSON.parse(r.conditions || '[]')[0]; return c ? `<div class="muted" style="font-size:11px">si ${esc(c.field)} ${({ eq: '=', neq: '≠', gt: '>', lt: '<', exists: 'existe' })[c.op] || c.op} ${esc(String(c.value ?? ''))}</div>` : ''; } catch { return ''; } })(); return `<tr><td><b>${esc(r.name)}</b></td><td>${esc(trigLabel[r.trigger] || r.trigger)}${cond}</td><td>${esc(actLabel[r.actionType] || r.actionType)}</td>
+        ${ov.rules.map(r => { const cond = (() => { try { const c = JSON.parse(r.conditions || '[]')[0]; return c ? `<div class="muted" style="font-size:11px">si ${esc(c.field)} ${({ eq: '=', neq: '≠', gt: '>', lt: '<', exists: 'existe' })[c.op] || c.op} ${esc(String(c.value ?? ''))}</div>` : ''; } catch { return ''; } })(); const stepsHtml = (r.stepList && r.stepList.length > 1) ? r.stepList.map((s, i) => `<div style="font-size:11.5px">${i + 1}. ${esc(actLabel[s.type] || s.type)}</div>`).join('') : esc(actLabel[r.actionType] || r.actionType); return `<tr><td><b>${esc(r.name)}</b></td><td>${esc(trigLabel[r.trigger] || r.trigger)}${cond}</td><td>${stepsHtml}</td>
           <td>${r.runCount}${r.lastRunAt ? ` <span class="muted" style="font-size:11px">· ${day(r.lastRunAt)}</span>` : ''}</td>
           <td>${r.enabled ? sb('active') + ' activa' : badge('Pausada', 'gray')}</td>
           <td><button class="btn small ghost" onclick="_auTest('${r.id}')">Probar</button>

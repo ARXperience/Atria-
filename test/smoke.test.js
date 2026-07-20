@@ -2067,6 +2067,59 @@ async function main() {
       assert.equal(ov.data.rules.find(x => x.id === ruleId).enabled, false);
     });
 
+    // ===== Automatizaciones multi-paso (§40) =====
+    let multiRuleId;
+    await test('crear una regla con secuencia de varios pasos', async () => {
+      const { status, data } = await api('/api/automations/rules', { method: 'POST', body: {
+        propertyId, name: 'Check-out → aviso + registro', trigger: 'checkout.completed',
+        steps: [
+          { type: 'notify', params: { role: 'HOUSEKEEPING', title: 'Habitación por limpiar', severity: 'info' } },
+          { type: 'log', params: { note: 'checkout procesado por automatización' } },
+        ],
+      } });
+      assert.equal(status, 201);
+      assert.equal(data.actionType, 'multi');
+      multiRuleId = data.id;
+      const ov = await api(`/api/automations/overview?propertyId=${propertyId}`);
+      const rule = ov.data.rules.find(r => r.id === multiRuleId);
+      assert.equal(rule.stepList.length, 2, 'la regla expone sus 2 pasos');
+    });
+
+    await test('un paso con acción inválida se rechaza', async () => {
+      const res = await api('/api/automations/rules', { method: 'POST', body: { propertyId, name: 'X', trigger: 'checkout.completed', steps: [{ type: 'cobrar_tarjeta', params: {} }] } });
+      assert.equal(res.status, 400);
+    });
+
+    await test('probar la regla multi-paso ejecuta toda la secuencia', async () => {
+      const notifBefore = (await api(`/api/notifications?propertyId=${propertyId}`)).data.length;
+      const r = await api(`/api/automations/rules/${multiRuleId}/test`, { method: 'POST', body: { payload: {} } });
+      assert.equal(r.data.executed, true);
+      await settle(300);
+      const notifAfter = (await api(`/api/notifications?propertyId=${propertyId}`)).data.length;
+      assert.ok(notifAfter > notifBefore, 'el paso notify creó una notificación');
+      const logs = await api(`/api/audit-logs?propertyId=${propertyId}&action=automation.rule_fired`);
+      assert.ok(logs.data.some(l => l.entityId === multiRuleId), 'el paso log registró en auditoría');
+    });
+
+    await test('la regla multi-paso corre sus pasos ante un evento real', async () => {
+      const before = (await api(`/api/automations/overview?propertyId=${propertyId}`)).data.rules.find(r => r.id === multiRuleId).runCount;
+      // Reserva → pago → check-in → check-out para disparar checkout.completed
+      const ci = futureDay(50), co = futureDay(51);
+      const av = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1 } });
+      const resv = await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1, roomTypeId: av.data[0].roomTypeId, guest: { fullName: 'Multi Paso' } } });
+      await api('/api/public/webhooks/payments/mock', { method: 'POST', body: { reference: resv.data.paymentLink.token } });
+      await settle();
+      await api(`/api/reservations/${resv.data.reservation.id}/checkin`, { method: 'POST', body: {} });
+      const co1 = await api(`/api/reservations/${resv.data.reservation.id}/checkout`, { method: 'POST', body: {} });
+      // Si queda saldo, el check-out escala a aprobación: la aprobamos para completarlo.
+      if (co1.status === 202 && co1.data.pendingApproval) {
+        await api(`/api/approvals/${co1.data.pendingApproval.id}/decide`, { method: 'POST', body: { approve: true } });
+      }
+      await settle(600);
+      const after = (await api(`/api/automations/overview?propertyId=${propertyId}`)).data.rules.find(r => r.id === multiRuleId).runCount;
+      assert.ok(after > before, 'la regla multi-paso se ejecutó con el check-out');
+    });
+
     // ===== Integraciones entre módulos (cierre de lazos) =====
     await test('una reseña nueva dispara la regla de automatización', async () => {
       const rule = await api('/api/automations/rules', { method: 'POST', body: { propertyId, name: 'Reseña → auditoría', trigger: 'review.created', actionType: 'log', actionParams: { note: 'reseña registrada' } } });
