@@ -34,7 +34,8 @@ export async function upsellOffers(reservationId) {
     const upgrades = [];
     for (const opt of avail) {
       if (opt.roomTypeId === r.roomTypeId || opt.availableRooms <= 0) continue;
-      const optRate = opt.ratePlans[0]?.price ?? opt.baseRate;
+      // Tarifa representativa = plan más económico disponible (no uno arbitrario).
+      const optRate = opt.ratePlans?.length ? Math.min(...opt.ratePlans.map(p => p.price)) : opt.baseRate;
       if (optRate > r.nightlyRate) {
         const deltaPerNight = money(optRate - r.nightlyRate);
         upgrades.push({

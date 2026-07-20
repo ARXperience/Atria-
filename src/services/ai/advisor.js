@@ -33,7 +33,6 @@ async function financeSignals(propertyId) {
   try {
     const fo = await financeOverview(propertyId);
     if (fo.receivable > 0) {
-      const withBalance = await prisma.reservation.count({ where: { propertyId, status: { in: ['confirmed', 'checked_in', 'checked_out'] } } });
       out.push({ area: 'finance', permission: 'finance.view', severity: fo.receivable > 2_000_000 ? 'warning' : 'info', title: `Cartera por cobrar: ${fmtCOP(fo.receivable)}`, detail: `Hay saldos pendientes en reservas activas. Gestiona el recaudo para mejorar el flujo de caja.`, action: 'Abrir Finanzas → Cartera y enviar links de pago del saldo.', metric: fo.receivable });
     }
     if (fo.monthNet < 0) out.push({ area: 'finance', permission: 'finance.view', severity: 'warning', title: `Resultado del mes en negativo (${fmtCOP(fo.monthNet)})`, detail: `Los egresos superan los ingresos del mes. Revisa cuentas por pagar y ocupación.`, action: 'Revisar estado de resultados y controlar gastos.', metric: fo.monthNet });
@@ -66,7 +65,7 @@ async function retentionUpsellSignals(propertyId) {
     const b = new Date(a.getTime() + DAY);
     // Llegadas de hoy sin pre-check-in → oportunidad de agilizar y hacer upsell.
     const arrivals = await prisma.reservation.count({ where: { propertyId, status: 'confirmed', checkIn: { gte: a, lt: b } } });
-    const noPre = await prisma.reservation.count({ where: { propertyId, status: 'confirmed', checkIn: { gte: a, lt: b }, precheckinAt: null } });
+    const noPre = arrivals > 0 ? await prisma.reservation.count({ where: { propertyId, status: 'confirmed', checkIn: { gte: a, lt: b }, precheckinAt: null } }) : 0;
     if (noPre > 0) out.push({ area: 'guest', permission: 'reservations.view', severity: 'info', title: `${noPre} de ${arrivals} llegada(s) de hoy sin pre-check-in`, detail: `Enviar el enlace de pre-check-in agiliza la recepción y habilita upsell (upgrade, late checkout, room service).`, action: 'Enviar pre-check-in desde el portal del huésped.', metric: noPre });
   } catch { /* */ }
   // Riesgo de fuga (churn): huéspedes en riesgo alto y contactables → win-back.
@@ -94,7 +93,7 @@ async function opsRiskSignals(propertyId) {
   } catch { /* */ }
   try {
     const low = await prisma.product.count({ where: { propertyId } });
-    const lowStock = low ? await prisma.$queryRawUnsafe(`SELECT COUNT(*) as c FROM Product WHERE propertyId = ? AND stock <= stockMin`, propertyId).then(r => Number(r?.[0]?.c || 0)).catch(() => 0) : 0;
+    const lowStock = low ? await prisma.$queryRawUnsafe(`SELECT COUNT(*) as c FROM Product WHERE propertyId = ? AND stockMin > 0 AND stock <= stockMin`, propertyId).then(r => Number(r?.[0]?.c || 0)).catch(() => 0) : 0;
     if (lowStock > 0) out.push({ area: 'inventory', permission: 'inventory.view', severity: 'info', title: `${lowStock} producto(s) en o bajo el mínimo`, detail: `Reponer a tiempo evita quiebres de stock en amenidades y minibar.`, action: 'Inventario → generar orden de compra.', metric: lowStock });
   } catch { /* */ }
   // Housekeeping: salidas por preparar con llegadas el mismo día.

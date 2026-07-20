@@ -2240,6 +2240,15 @@ async function main() {
       assert.ok(a.score <= 0, 'la alerta corresponde a sentimiento negativo');
     });
 
+    await test('una reseña mayormente positiva con un matiz negativo no se sesga a negativa', async () => {
+      // Reseña 5★: elogia comida, con la palabra "caro" presente (matiz de precio).
+      await api('/api/reputation/reviews', { method: 'POST', body: { propertyId, guestName: 'Positivo', source: 'google', rating: 5, comment: 'El desayuno estaba delicioso y el servicio excelente, aunque el precio es un poco caro.' } });
+      const { data } = await api(`/api/reputation/sentiment?propertyId=${propertyId}`);
+      const comida = data.topics.find(t => t.topic === 'comida');
+      // Con el fix, la palabra "caro" no arrastra el tema 'comida' a negativo.
+      assert.ok(comida && comida.positive >= 1 && comida.score > -0.5, 'el tema comida se mantiene positivo pese al matiz de precio');
+    });
+
     // ===== Eventos & corporativo (§33) =====
     let venueId, eventId;
     await test('los salones demo están sembrados', async () => {

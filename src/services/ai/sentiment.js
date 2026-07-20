@@ -26,15 +26,22 @@ const POS = ['excelente', 'genial', 'increible', 'perfecto', 'impecable', 'comod
 const NEG = ['sucio', 'sucia', 'malo', 'mala', 'pesimo', 'terrible', 'horrible', 'grosero', 'lento', 'ruidos', 'roto', 'dañ', 'averi', 'incomod', 'caro', 'costos', 'demora', 'fila', 'mugre', 'polvo', 'no funciona', 'no servia', 'gotea', 'frio', 'escandalo', 'bulla', 'pequeñ', 'decepcion'];
 const NEGATORS = ['no', 'nunca', 'sin', 'tampoco', 'jamas'];
 
-// Polaridad de un texto: cuenta señales +/- con inversión simple por negadores.
+// Polaridad de un texto: suma señales +/- con inversión simple por negadores.
+// Las señales multi-palabra ("no funciona", "vale la pena") se cuentan una vez
+// sobre el texto completo; las de una palabra, token a token.
 function polarity(text) {
-  const toks = norm(text).split(/[^a-z0-9ñ]+/).filter(Boolean);
+  const n = norm(text);
   let score = 0;
+  // Frases (multi-palabra): una pasada sobre el texto completo.
+  for (const p of POS) if (p.includes(' ') && n.includes(p)) score += 1;
+  for (const w of NEG) if (w.includes(' ') && n.includes(w)) score -= 1;
+  // Palabras sueltas: por token, con inversión si va precedido de un negador.
+  const toks = n.split(/[^a-z0-9ñ]+/).filter(Boolean);
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i];
-    const neg = i > 0 && NEGATORS.includes(toks[i - 1]);
-    if (POS.some(p => t.startsWith(p))) score += neg ? -1 : 1;
-    else if (NEG.some(n => t.startsWith(n) || norm(text).includes(n))) score += neg ? 1 : -1;
+    const negated = i > 0 && NEGATORS.includes(toks[i - 1]);
+    if (POS.some(p => !p.includes(' ') && t.startsWith(p))) score += negated ? -1 : 1;
+    else if (NEG.some(w => !w.includes(' ') && t.startsWith(w))) score += negated ? 1 : -1;
   }
   return score;
 }
