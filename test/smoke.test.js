@@ -1597,6 +1597,25 @@ async function main() {
       assert.ok(!after.data.some(s => s.trigger === 'foreign_guest.detected' && s.actionType === sug.actionType), 'la sugerencia aplicada ya no debe aparecer');
     });
 
+    // ===== Copiloto interno ampliado (§41) =====
+    await test('el copiloto interno responde sobre finanzas y reputación (gerente)', async () => {
+      const fin = await api('/api/assistant/internal', { method: 'POST', body: { propertyId, text: '¿cómo va el resultado financiero y la cartera?' } });
+      assert.equal(fin.status, 200);
+      assert.ok(/financiero|ingresos|resultado/i.test(fin.data.reply));
+      const rep = await api('/api/assistant/internal', { method: 'POST', body: { propertyId, text: '¿cuál es nuestra reputación y NPS?' } });
+      assert.ok(/calificaci|reseña|NPS/i.test(rep.data.reply));
+      const ev = await api('/api/assistant/internal', { method: 'POST', body: { propertyId, text: '¿cuántos eventos próximos hay?' } });
+      assert.ok(/evento|pipeline/i.test(ev.data.reply));
+    });
+
+    await test('el copiloto NO revela finanzas a housekeeping (permisos por rol)', async () => {
+      const { data: login } = await api('/api/auth/login', { method: 'POST', body: { email: 'housekeeping@atria.co', password: 'atria2026' } });
+      const res = await fetch(`${BASE}/api/assistant/internal`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${login.token}` }, body: JSON.stringify({ propertyId, text: '¿cómo va el resultado financiero?' }) });
+      const data = await res.json();
+      assert.equal(res.status, 200);
+      assert.ok(!/copiloto financiero|resultado:/i.test(data.reply), 'no debe entregar el resumen financiero a housekeeping');
+    });
+
     // ===== Endurecimiento para producción (§50) =====
     await test('las respuestas incluyen cabeceras de seguridad', async () => {
       const res = await fetch(`${BASE}/api/health`);

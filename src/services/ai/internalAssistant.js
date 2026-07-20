@@ -10,6 +10,11 @@ import { llmAvailable, llmToolLoop } from './claude.js';
 import { buildTools, toolDefsForLLM } from './tools.js';
 import { fmtCOP } from '../../lib/util.js';
 import { audit } from '../../lib/audit.js';
+import { financeOverview, financialNarrative } from '../finance.js';
+import { reputationOverview } from '../reputation.js';
+import { eventsOverview } from '../events.js';
+import { fonturOverview } from '../fontur.js';
+import { marketingOverview } from '../marketing.js';
 
 const ROLE_SCOPE = {
   FRONTDESK: 'reception', HOUSEKEEPING: 'housekeeping', MAINTENANCE: 'maintenance',
@@ -97,12 +102,53 @@ export async function internalAssistantReply({ user, propertyId, text }) {
     return { reply: `👔 Empleados activos: ${emps}.${p ? ` Último periodo de nómina: ${p.month}/${p.year} (${p.status}).` : ' Aún no hay periodos de nómina.'}` };
   }
 
-  // 9) Conocimiento interno
+  // 9) Finanzas: resumen del mes y cartera (copiloto financiero)
+  if (/finanza|resultado|utilidad|cartera|estado de resultado|p&g|pyg|egreso|rentab/.test(t) && can('finance.view')) {
+    const nar = await financialNarrative(propertyId);
+    return { reply: `🤖 *Copiloto financiero*\n${nar.narrative}` };
+  }
+
+  // 10) Reputación: calificación y reseñas
+  if (/reputaci|reseña|resena|calificaci|estrella|opinion|review|nps/.test(t) && can('reputation.view')) {
+    const rep = await reputationOverview(propertyId);
+    return { reply: `⭐ Calificación media: *${rep.avg || '—'}/5* (${rep.count} reseña(s)). Sin responder: ${rep.pending}. Tasa de respuesta: ${rep.responseRate}%. NPS aprox.: ${rep.nps}.` };
+  }
+
+  // 11) Eventos & salones
+  if (/evento|salon|salón|montaje|banquete|cotizaci.*event|reserva de sal/.test(t) && can('events.view')) {
+    const ev = await eventsOverview(propertyId);
+    return { reply: `🎉 Eventos: ${ev.upcomingCount} próximo(s), ${ev.confirmed} confirmado(s). Pipeline en cotizaciones: ${fmtCOP(ev.pipeline)}. Ingresos por eventos del mes: ${fmtCOP(ev.monthRevenue)}.` };
+  }
+
+  // 12) FONTUR (parafiscal)
+  if (/fontur|parafiscal|contribucion.*turismo|turismo/.test(t) && can('fontur.view')) {
+    const f = await fonturOverview(propertyId);
+    return { reply: `🏝️ FONTUR ${f.current.period}: base ${fmtCOP(f.current.operatingIncome)} × ${(f.current.rate * 1000).toLocaleString('es-CO', { maximumFractionDigits: 2 })} por mil = *${fmtCOP(f.current.amount)}*. Pagado en el año: ${fmtCOP(f.paidYtd)}.` };
+  }
+
+  // 13) Marketing: alcance y campañas
+  if (/marketing|campaña|campana|opt.?in|consentimiento.*market|contactable/.test(t) && can('marketing.view')) {
+    const m = await marketingOverview(propertyId);
+    return { reply: `📣 Contactables (opt-in): ${m.reachable} (${m.optInRate}% de la base). Campañas enviadas: ${m.campaignsSent}, mensajes: ${m.totalSent}.` };
+  }
+
+  // 14) Ocupación / KPIs gerenciales
+  if (/ocupaci|adr|revpar|kpi|indicador|como vamos|desempeño|desempeno/.test(t) && can('dashboard.view') && can('finance.view')) {
+    const fo = await financeOverview(propertyId);
+    const grp = await prisma.room.groupBy({ by: ['status'], where: { propertyId, active: true }, _count: true });
+    const c = Object.fromEntries(grp.map((g) => [g.status, g._count]));
+    const total = grp.reduce((s, g) => s + g._count, 0);
+    const oos = c.out_of_service || 0;
+    const occ = total - oos > 0 ? Math.round(((c.occupied || 0) / (total - oos)) * 100) : 0;
+    return { reply: `📊 Ocupación: *${occ}%* (${c.occupied || 0}/${total - oos}). Ingresos del mes: ${fmtCOP(fo.monthIncome)}, resultado: ${fmtCOP(fo.monthNet)}. Cartera por cobrar: ${fmtCOP(fo.receivable)}.` };
+  }
+
+  // 15) Conocimiento interno
   const snap = await knowledgeSnapshot(propertyId, { visibility: 'internal' });
   const hit = searchKnowledge(snap, text);
   if (hit) return { reply: hit.answer };
 
-  // 10) Motor de herramientas con LLM (si hay API key)
+  // 16) Motor de herramientas con LLM (si hay API key)
   if (profile.llmEnabled && llmAvailable()) {
     const tools = buildTools({ propertyId, profile, conversation: null });
     const reply = await llmToolLoop({
@@ -114,7 +160,7 @@ export async function internalAssistantReply({ user, propertyId, text }) {
     if (reply) return { reply };
   }
 
-  // 11) Ayuda según rol
+  // 17) Ayuda según rol
   return { reply: helpFor(user.role) };
 }
 
@@ -125,6 +171,11 @@ function helpFor(role) {
   if (hasPermission(role, 'housekeeping.view')) extra.push('las limpiezas pendientes');
   if (hasPermission(role, 'maintenance.view')) extra.push('las órdenes de mantenimiento');
   if (hasPermission(role, 'payments.view')) extra.push('la caja del día');
+  if (hasPermission(role, 'finance.view')) extra.push('el resumen financiero y la cartera');
+  if (hasPermission(role, 'reputation.view')) extra.push('la reputación y reseñas');
+  if (hasPermission(role, 'events.view')) extra.push('los eventos y salones');
+  if (hasPermission(role, 'fontur.view')) extra.push('la contribución FONTUR');
+  if (hasPermission(role, 'marketing.view')) extra.push('el alcance de marketing');
   if (hasPermission(role, 'hr.view')) extra.push('empleados y nómina');
   return `Soy tu copiloto interno 🧭. Puedo consultarte, por ejemplo:\n${[...base, ...extra].map((x) => `• ${x}`).join('\n')}\n\n¿Qué necesitas?`;
 }
