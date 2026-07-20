@@ -6,8 +6,42 @@ import { prisma } from '../db.js';
 import { requirePermission, propertyScope, ROLES } from '../middleware/auth.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
+import { importRooms, importGuests, importEmployees, goLiveChecklist } from '../services/importer.js';
 
 export const adminRouter = Router();
+
+// ---- Onboarding e importadores (§55.2) ----
+adminRouter.get('/checklist', requirePermission('settings.view'), async (req, res) => {
+  if (!propertyScope(req, req.query.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  res.json(await goLiveChecklist(req.query.propertyId, req.user.companyId));
+});
+
+adminRouter.post('/import/rooms', requirePermission('rooms.manage'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try {
+    const result = await importRooms(req.body.propertyId, req.body.csv ?? req.body.rows);
+    await audit({ companyId: req.user.companyId, user: req.user, action: 'import.rooms', entity: 'Room', after: { imported: result.imported, errores: result.errors.length } });
+    res.json(result);
+  } catch (err) { badRequest(res, err.message); }
+});
+
+adminRouter.post('/import/guests', requirePermission('guests.create'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try {
+    const result = await importGuests(req.body.propertyId, req.body.csv ?? req.body.rows);
+    await audit({ companyId: req.user.companyId, user: req.user, action: 'import.guests', entity: 'Guest', after: { imported: result.imported, errores: result.errors.length } });
+    res.json(result);
+  } catch (err) { badRequest(res, err.message); }
+});
+
+adminRouter.post('/import/employees', requirePermission('hr.manage'), async (req, res) => {
+  if (!propertyScope(req, req.body?.propertyId)) return res.status(403).json({ error: 'Sin acceso a esta sede' });
+  try {
+    const result = await importEmployees(req.user.companyId, req.body.propertyId, req.body.csv ?? req.body.rows);
+    await audit({ companyId: req.user.companyId, user: req.user, action: 'import.employees', entity: 'Employee', after: { imported: result.imported, errores: result.errors.length } });
+    res.json(result);
+  } catch (err) { badRequest(res, err.message); }
+});
 
 // ---- Sedes ----
 adminRouter.get('/properties', async (req, res) => {

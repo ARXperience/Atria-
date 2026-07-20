@@ -1617,6 +1617,37 @@ async function main() {
       assert.ok(!/copiloto financiero|resultado:/i.test(data.reply), 'no debe entregar el resumen financiero a housekeeping');
     });
 
+    // ===== Onboarding e importadores (§55.2) =====
+    await test('checklist de go-live evalúa la preparación de la sede', async () => {
+      const { status, data } = await api(`/api/admin/checklist?propertyId=${propertyId}`);
+      assert.equal(status, 200);
+      assert.ok(Array.isArray(data.items) && data.items.length >= 8);
+      assert.ok(data.items.find(i => i.key === 'rooms').ok, 'la demo ya tiene habitaciones');
+      assert.ok(data.readiness >= 0 && data.readiness <= 100);
+    });
+
+    await test('importar habitaciones por CSV valida duplicados y tipos', async () => {
+      const csv = 'numero,tipo,piso\nZ101,STD,9\nZ102,STD,9\nZ101,STD,9\nZ103,INEXISTENTE,9';
+      const r = await api('/api/admin/import/rooms', { method: 'POST', body: { propertyId, csv } });
+      assert.equal(r.status, 200);
+      assert.equal(r.data.imported, 2, 'importa Z101 y Z102');
+      assert.equal(r.data.errors.length, 2, 'rechaza el duplicado y el tipo inexistente');
+    });
+
+    await test('importar huéspedes por CSV deduplica por documento', async () => {
+      const csv = 'nombre,documento,telefono,correo\nImport Uno,IMP-111,3001,uno@x.co\nImport Dos,IMP-222,3002,dos@x.co\nImport Uno,IMP-111,3001,uno@x.co';
+      const r = await api('/api/admin/import/guests', { method: 'POST', body: { propertyId, csv } });
+      assert.equal(r.data.imported, 2);
+      assert.equal(r.data.errors.length, 1);
+    });
+
+    await test('importar empleados valida documento, cargo y salario', async () => {
+      const csv = 'nombre,documento,cargo,area,salario,ingreso\nEmp Uno,EMP-111,Mesero,restaurante,1500000,2026-01-10\nEmp Malo,EMP-222,,cocina,1500000,2026-01-10\nEmp Tres,EMP-333,Cocinero,cocina,0,2026-01-10';
+      const r = await api('/api/admin/import/employees', { method: 'POST', body: { propertyId, csv } });
+      assert.equal(r.data.imported, 1, 'solo Emp Uno es válido');
+      assert.equal(r.data.errors.length, 2, 'rechaza sin cargo y salario 0');
+    });
+
     // ===== Seguridad avanzada (§55.3): 2FA, recuperación, sesiones =====
     const secEmail = `sec-${Date.now()}@atria.co`;
     await test('crear usuario dedicado para pruebas de seguridad', async () => {

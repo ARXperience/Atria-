@@ -196,6 +196,7 @@
     ['audit', '🔍 Auditoría'],
     ['integrations', '🔌 Integraciones'],
     ['automations', '⚡ Automatizaciones'],
+    ['onboarding', '🚀 Onboarding & Importar'],
     ['settings', '⚙️ Configuración'],
   ];
 
@@ -2380,6 +2381,48 @@
       </div>`;
   }
 
+  async function viewOnboarding() {
+    const chk = await get(`/admin/checklist?${pid()}`);
+    const readyColor = chk.readiness >= 80 ? 'var(--green)' : chk.readiness >= 50 ? 'var(--yellow)' : 'var(--red)';
+    window._import = async (kind) => {
+      const csv = $(`#imp_${kind}`).value.trim();
+      if (!csv) { toast('Pega el CSV primero', true); return; }
+      const box = $(`#impres_${kind}`);
+      box.innerHTML = '<span class="muted">Importando…</span>';
+      try {
+        const r = await api(`/admin/import/${kind}`, { method: 'POST', body: { propertyId: state.propertyId, csv } });
+        const errors = Array.isArray(r?.errors) ? r.errors : [];
+        const imported = r?.imported ?? 0, total = r?.total ?? 0;
+        const errs = errors.length ? `<div style="color:var(--yellow);font-size:12px;margin-top:6px">${errors.slice(0, 8).map(e => `Fila ${e.row}${e.number || e.documentNumber ? ` (${esc(e.number || e.documentNumber)})` : ''}: ${esc(e.reason)}`).join('<br>')}${errors.length > 8 ? `<br>… y ${errors.length - 8} más` : ''}</div>` : '';
+        box.innerHTML = `<b style="color:var(--green)">✅ ${imported} importado(s)</b> de ${total} · ${errors.length} con error.${errs}`;
+        toast(`${imported} registro(s) importado(s)`);
+      } catch (e) { box.innerHTML = ''; toast(e.message, true); }
+    };
+    const importCard = (kind, title, headers, example) => `
+      <div class="card"><h3>${title}</h3>
+        <p class="muted" style="font-size:12px">Pega el CSV con encabezados. Columnas reconocidas: <code>${esc(headers)}</code>.</p>
+        <textarea id="imp_${kind}" rows="5" placeholder="${esc(example)}" style="width:100%;font-family:monospace;font-size:12px"></textarea>
+        <div class="row mt" style="align-items:center"><button class="btn fit" onclick="_import('${kind}')">Importar</button><div id="impres_${kind}" class="muted" style="font-size:13px"></div></div>
+      </div>`;
+    return `
+      <div class="card"><h3>🚀 Preparación para operar (go-live)</h3>
+        <div class="row" style="align-items:center;gap:14px">
+          <div style="flex:1"><div style="height:12px;background:var(--surface-2);border-radius:6px;overflow:hidden"><div style="height:100%;width:${chk.readiness}%;background:${readyColor};transition:width .5s"></div></div></div>
+          <b style="color:${readyColor};font-size:18px">${chk.readiness}%</b>
+        </div>
+        <table class="mt"><tr><th></th><th>Requisito</th><th>Detalle</th></tr>
+        ${chk.items.map(i => `<tr><td style="width:30px;font-size:16px">${i.ok ? '✅' : '⬜'}</td><td>${esc(i.label)}</td><td class="muted">${esc(i.detail)}</td></tr>`).join('')}</table>
+        <p class="muted mt" style="font-size:12px">${chk.done}/${chk.total} requisitos completos. Usa los importadores para cargar tus datos existentes.</p>
+      </div>
+      <div class="grid cols-2 mt">
+        ${importCard('rooms', '🛏️ Importar habitaciones', 'numero, tipo (código/nombre), piso', 'numero,tipo,piso\n101,STD,1\n102,STD,1\n201,SUP,2')}
+        ${importCard('guests', '👤 Importar huéspedes', 'nombre, documento, tipo, telefono, correo, nacionalidad, ciudad', 'nombre,documento,telefono,correo,nacionalidad\nMaría Gómez,52123456,3001112233,maria@correo.co,CO')}
+      </div>
+      <div class="mt">
+        ${importCard('employees', '👔 Importar empleados', 'nombre, documento, cargo, area, salario, riesgo, ingreso, eps, afp, arl, ccf', 'nombre,documento,cargo,area,salario,ingreso\nLaura Ruiz,1012345678,Recepcionista,recepción,1800000,2026-01-15')}
+      </div>`;
+  }
+
   async function viewSettings() {
     const [users, params, props, gateways, templates, policies, me, sessions] = await Promise.all([
       get('/admin/users').catch(() => []),
@@ -2555,6 +2598,7 @@
     audit: ['Auditoría y trazabilidad', viewAudit],
     integrations: ['Centro de integraciones', viewIntegrations],
     automations: ['Automatizaciones — reglas no-code', viewAutomations],
+    onboarding: ['Onboarding e importación de datos', viewOnboarding],
     settings: ['Configuración', viewSettings],
   };
 
