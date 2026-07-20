@@ -40,6 +40,8 @@ export async function propertyKpis(propertyId) {
     monthRevenue: money(monthPayments._sum.amount || 0),
     adr: money(adr), revpar: money(revpar),
     receivable: ar.total, pendingApprovals,
+    // Componentes crudos para ponderar KPIs a nivel de grupo.
+    roomRevenue, roomNights: roomNightsSold, sellableNights: sellable * daysElapsed,
   };
 }
 
@@ -57,8 +59,13 @@ export async function portfolioOverview(user) {
     monthRevenue: t.monthRevenue + s.monthRevenue,
     receivable: t.receivable + s.receivable,
     pendingApprovals: t.pendingApprovals + s.pendingApprovals,
-  }), { rooms: 0, occupied: 0, sellable: 0, inHouse: 0, monthRevenue: 0, receivable: 0, pendingApprovals: 0 });
+    roomRevenue: t.roomRevenue + s.roomRevenue,
+    roomNights: t.roomNights + s.roomNights,
+    sellableNights: t.sellableNights + s.sellableNights,
+  }), { rooms: 0, occupied: 0, sellable: 0, inHouse: 0, monthRevenue: 0, receivable: 0, pendingApprovals: 0, roomRevenue: 0, roomNights: 0, sellableNights: 0 });
   totals.occupancyPct = totals.sellable > 0 ? Math.round((totals.occupied / totals.sellable) * 100) : 0;
-  // ADR/RevPAR del portafolio ponderados por ingreso, no promedio simple.
+  // ADR/RevPAR del portafolio ponderados por ingreso/noches, no promedio simple.
+  totals.adr = totals.roomNights > 0 ? money(totals.roomRevenue / totals.roomNights) : 0;
+  totals.revpar = totals.sellableNights > 0 ? money(totals.roomRevenue / totals.sellableNights) : 0;
   return { sites, totals, count: sites.length };
 }

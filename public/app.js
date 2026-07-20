@@ -256,6 +256,12 @@
         <div class="kpi"><div class="label">Ingresos del mes</div><div class="value" style="color:var(--green)"><span data-count="${t.monthRevenue}" data-fmt="cop">$0</span></div></div>
         <div class="kpi"><div class="label">Cartera por cobrar</div><div class="value" style="color:${t.receivable ? 'var(--yellow)' : 'inherit'}"><span data-count="${t.receivable}" data-fmt="cop">$0</span></div></div>
       </div>
+      <div class="grid cols-4 mt">
+        <div class="kpi"><div class="label">ADR del grupo</div><div class="value"><span data-count="${t.adr}" data-fmt="cop">$0</span></div></div>
+        <div class="kpi"><div class="label">RevPAR del grupo</div><div class="value"><span data-count="${t.revpar}" data-fmt="cop">$0</span></div></div>
+        <div class="kpi"><div class="label">Huéspedes en casa</div><div class="value">${t.inHouse}</div></div>
+        <div class="kpi"><div class="label">Aprobaciones pendientes</div><div class="value" style="color:${t.pendingApprovals ? 'var(--yellow)' : 'inherit'}">${t.pendingApprovals}</div></div>
+      </div>
       <div class="card mt"><h3>Sedes del portafolio</h3>
         <table><tr><th>Sede</th><th>Ciudad</th><th>Ocupación</th><th>En casa</th><th>ADR</th><th>RevPAR</th><th>Ingresos mes</th><th>Cartera</th><th>Aprob.</th><th></th></tr>
         ${p.sites.map(s => `<tr class="clickable" onclick="_goSite('${s.id}')">

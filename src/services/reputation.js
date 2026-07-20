@@ -4,6 +4,7 @@
 // (IA como ayudante interno, con acceso solo a lo que le corresponde).
 import { prisma } from '../db.js';
 import { audit } from '../lib/audit.js';
+import { emitEvent } from '../lib/events.js';
 import { getAgentProfile } from './ai/agentProfile.js';
 
 const SOURCES = ['direct', 'google', 'booking', 'tripadvisor', 'expedia'];
@@ -19,9 +20,12 @@ export async function createReview({ propertyId, reservationId = null, guestId =
   if (!(r >= 1 && r <= 5)) throw new Error('rating debe estar entre 1 y 5');
   if (!guestName) throw new Error('guestName requerido');
   if (!SOURCES.includes(source)) throw new Error(`source inválida (${SOURCES.join(', ')})`);
-  return prisma.review.create({
+  const review = await prisma.review.create({
     data: { propertyId, reservationId, guestId, guestName, source, rating: r, title, comment, sentiment: sentimentOf(r) },
   });
+  // Disponibiliza el evento para el automatizador (§40): p.ej. reseña negativa → alerta.
+  emitEvent('review.created', { propertyId, entityId: review.id, rating: r, sentiment: review.sentiment, guestName, source });
+  return review;
 }
 
 // Borrador de respuesta sugerido, con el tono del perfil de reputación del hotel.

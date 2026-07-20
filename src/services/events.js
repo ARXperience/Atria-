@@ -4,6 +4,7 @@
 import { prisma } from '../db.js';
 import { money } from '../lib/util.js';
 import { audit } from '../lib/audit.js';
+import { emitEvent } from '../lib/events.js';
 
 const SETUPS = ['auditorio', 'escuela', 'banquete', 'coctel', 'u'];
 const DURATIONS = ['full', 'half', 'hourly'];
@@ -89,6 +90,7 @@ export async function confirmEvent(id, { user } = {}) {
   }
   const updated = await prisma.eventBooking.update({ where: { id }, data: { status: 'confirmed' } });
   await audit({ propertyId: ev.propertyId, user, action: 'event.confirmed', entity: 'EventBooking', entityId: id, after: { code: ev.code, total: ev.total } });
+  emitEvent('event.confirmed', { propertyId: ev.propertyId, entityId: ev.id, code: ev.code, total: ev.total });
   return updated;
 }
 

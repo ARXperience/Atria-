@@ -1501,6 +1501,35 @@ async function main() {
       assert.equal(ov.data.rules.find(x => x.id === ruleId).enabled, false);
     });
 
+    // ===== Integraciones entre módulos (cierre de lazos) =====
+    await test('una reseña nueva dispara la regla de automatización', async () => {
+      const rule = await api('/api/automations/rules', { method: 'POST', body: { propertyId, name: 'Reseña → auditoría', trigger: 'review.created', actionType: 'log', actionParams: { note: 'reseña registrada' } } });
+      assert.equal(rule.status, 201);
+      await api('/api/reputation/reviews', { method: 'POST', body: { propertyId, guestName: 'Trigger Test', source: 'google', rating: 1, comment: 'Prueba de disparo.' } });
+      await settle(600);
+      const ov = await api(`/api/automations/overview?propertyId=${propertyId}`);
+      assert.ok(ov.data.rules.find(r => r.id === rule.data.id).runCount >= 1, 'la regla review.created debió ejecutarse');
+    });
+
+    await test('confirmar un evento dispara la regla event.confirmed', async () => {
+      const rule = await api('/api/automations/rules', { method: 'POST', body: { propertyId, name: 'Evento confirmado → notificar', trigger: 'event.confirmed', actionType: 'notify', actionParams: { role: 'MANAGER', title: 'Evento confirmado' } } });
+      const venues = (await api(`/api/events/venues?propertyId=${propertyId}`)).data;
+      const big = venues.reduce((a, b) => (b.capacity > a.capacity ? b : a));
+      const ev = await api('/api/events', { method: 'POST', body: { propertyId, venueId: big.id, clientName: 'Trigger Eventos', date: futureDay(300), attendees: 20, durationType: 'full' } });
+      await api(`/api/events/${ev.data.id}/confirm`, { method: 'POST' });
+      await settle(600);
+      const ov = await api(`/api/automations/overview?propertyId=${propertyId}`);
+      assert.ok(ov.data.rules.find(r => r.id === rule.data.id).runCount >= 1, 'la regla event.confirmed debió ejecutarse');
+    });
+
+    await test('el portafolio pondera ADR y RevPAR del grupo', async () => {
+      const { data } = await api('/api/portfolio/overview');
+      assert.ok('adr' in data.totals && 'revpar' in data.totals);
+      const expectedAdr = data.totals.roomNights > 0 ? Math.round(data.totals.roomRevenue / data.totals.roomNights) : 0;
+      assert.equal(data.totals.adr, expectedAdr, 'ADR ponderado por noches vendidas');
+      assert.ok(data.totals.adr >= 0 && data.totals.revpar >= 0);
+    });
+
     console.log(`\n📊 Resultado: ${passed} OK, ${failed} fallidas`);
     process.exitCode = failed ? 1 : 0;
   } finally {
