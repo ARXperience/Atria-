@@ -1483,6 +1483,37 @@ async function main() {
       assert.ok(d.balance > 0);
     });
 
+    // ===== Upsell personalizado (§12/§41) =====
+    let upsellCode;
+    await test('el motor de upsell propone upgrade de categoría y complementos', async () => {
+      const ci = futureDay(70), co = futureDay(73);
+      // Reserva del tipo más económico para que existan categorías superiores.
+      const av = await api('/api/booking/search', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1 } });
+      const cheapest = av.data.slice().sort((a, b) => a.baseRate - b.baseRate)[0];
+      const resv = await api('/api/booking/reservations', { method: 'POST', body: { propertyId, checkIn: ci, checkOut: co, adults: 1, roomTypeId: cheapest.roomTypeId, guest: { fullName: 'Huésped Upsell' } } });
+      await api('/api/public/webhooks/payments/mock', { method: 'POST', body: { reference: resv.data.paymentLink.token } });
+      await settle();
+      upsellCode = resv.data.reservation.code;
+      const up = await api(`/api/reservations/${resv.data.reservation.id}/upsell`);
+      assert.equal(up.status, 200);
+      assert.ok(up.data.offers.some(o => o.type === 'addon'), 'ofrece complementos (late/early)');
+      assert.ok(up.data.offers.some(o => o.type === 'upgrade'), 'ofrece upgrade de categoría');
+      const upg = up.data.offers.find(o => o.type === 'upgrade');
+      assert.ok(upg.price > 0 && upg.deltaPerNight > 0, 'el upgrade tiene un delta de precio');
+    });
+
+    await test('el huésped acepta una oferta desde el portal y recepción es avisada', async () => {
+      const offers = await (await fetch(`${BASE}/api/public/guest/reservation/${upsellCode}/upsell`)).json();
+      const offer = offers.offers[0];
+      const r = await fetch(`${BASE}/api/public/guest/reservation/${upsellCode}/upsell/accept`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ offerId: offer.id }) });
+      assert.equal(r.status, 200);
+      const d = await r.json();
+      assert.equal(d.accepted, true);
+      // Queda como solicitud para recepción.
+      const reqs = await api(`/api/ops/guest-requests?propertyId=${propertyId}`);
+      assert.ok(reqs.data.some(q => /Upsell aceptado/.test(q.detail || '')), 'recepción ve la aceptación del upsell');
+    });
+
     // ===== Acciones sensibles con aprobación real (§47/§55.6) =====
     await test('descuento al folio requiere aprobación y publica un cargo negativo', async () => {
       const req = await api(`/api/reservations/${roomServiceResvId}/discount`, { method: 'POST', body: { amount: 40000, reason: 'Cortesía por demora' } });

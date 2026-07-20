@@ -243,6 +243,20 @@ publicRouter.post('/guest/reservation/:code/express-checkout', async (req, res) 
   catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// Ofertas de upsell personalizadas para el huésped (§12/§41)
+publicRouter.get('/guest/reservation/:code/upsell', async (req, res) => {
+  const r = await prisma.reservation.findUnique({ where: { code: String(req.params.code).toUpperCase() } });
+  if (!r) return res.status(404).json({ error: 'Reserva no encontrada' });
+  try { const { upsellOffers } = await import('../services/ai/upsell.js'); res.json(await upsellOffers(r.id)); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+publicRouter.post('/guest/reservation/:code/upsell/accept', async (req, res) => {
+  const r = await prisma.reservation.findUnique({ where: { code: String(req.params.code).toUpperCase() } });
+  if (!r) return res.status(404).json({ error: 'Reserva no encontrada' });
+  try { const { acceptUpsell } = await import('../services/ai/upsell.js'); res.json(await acceptUpsell(r.id, req.body?.offerId)); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 // El huésped deja una reseña post-estancia desde su portal (con el código).
 publicRouter.post('/guest/reservation/:code/review', async (req, res) => {
   const r = await prisma.reservation.findUnique({ where: { code: req.params.code }, include: { guest: true } });

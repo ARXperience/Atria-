@@ -27,6 +27,7 @@
       if (!res.ok) { box.innerHTML = '<div class="brand">ATR<b>IA</b></div><p style="color:var(--red);text-align:center">Reserva no encontrada.</p>'; return; }
       const r = await res.json();
       const requests = await fetch(base + '/requests').then(x => x.ok ? x.json() : []).catch(() => []);
+      const upsell = ['confirmed', 'checked_in'].includes(r.status) ? await fetch(base + '/upsell').then(x => x.ok ? x.json() : { offers: [] }).catch(() => ({ offers: [] })) : { offers: [] };
       const canRequest = ['confirmed', 'checked_in'].includes(r.status);
       const canPre = ['tentative', 'confirmed'].includes(r.status) && !r.precheckinDone;
       const reqLabel = { cleaning: 'Limpieza', towels: 'Toallas', amenities: 'Amenidades', room_service: 'Room service', maintenance: 'Mantenimiento', checkout: 'Check-out', other: 'Otro' };
@@ -64,6 +65,15 @@
           <button class="btn mt" style="width:100%" onclick="submitPre()">Completar check-in en línea</button>
         </div>` : r.precheckinDone ? `<div class="card mt"><h3>✅ Check-in en línea completo</h3><p class="muted">Tu registro está listo${r.arrivalTime ? ` · llegada estimada ${esc(r.arrivalTime)}` : ''}. Te esperamos.</p></div>` : ''}
 
+        ${upsell.offers && upsell.offers.length ? `<div class="card mt">
+          <h3>✨ Mejora tu estadía${upsell.returning ? ' · ¡bienvenido de vuelta!' : ''}</h3>
+          <p class="muted" style="font-size:13px">Seleccionado para ti según tu reserva:</p>
+          ${upsell.offers.map(o => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">
+            <div><b style="font-size:14px">${esc(o.title)}</b><div class="muted" style="font-size:12px">${esc(o.detail)}</div></div>
+            <button class="btn secondary" style="white-space:nowrap" onclick="acceptUpsell('${o.id}')">${o.price != null ? cop(o.price) : 'Me interesa'}</button>
+          </div>`).join('')}
+        </div>` : ''}
+
         ${canRequest ? `<div class="card mt">
           <h3>🛎️ Solicitar un servicio</h3>
           <select id="rType"><option value="towels">Toallas</option><option value="cleaning">Limpieza de habitación</option><option value="amenities">Amenidades</option><option value="room_service">Room service</option><option value="maintenance">Reportar una falla</option><option value="other">Otro</option></select>
@@ -96,6 +106,10 @@
     }
     async function sendRequest() {
       try { await post('/request', { type: rType.value, detail: rDetail.value }); toast('Solicitud enviada al hotel'); load(); }
+      catch (e) { toast(e.message, true); }
+    }
+    async function acceptUpsell(offerId) {
+      try { const d = await post('/upsell/accept', { offerId }); toast('¡Listo! Recepción coordinará: ' + d.offer); load(); }
       catch (e) { toast(e.message, true); }
     }
     async function payBalance() {

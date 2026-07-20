@@ -40,6 +40,14 @@ reservationsRouter.get('/:id', requirePermission('reservations.view'), async (re
   res.json({ ...r, roomType, balance });
 });
 
+// Oportunidades de upsell de la reserva (para ofrecer en recepción)
+reservationsRouter.get('/:id/upsell', requirePermission('reservations.view'), async (req, res) => {
+  const r = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+  if (!r || !propertyScope(req, r.propertyId)) return res.status(404).json({ error: 'Reserva no encontrada' });
+  const { upsellOffers } = await import('../services/ai/upsell.js');
+  res.json(await upsellOffers(r.id));
+});
+
 reservationsRouter.post('/:id/confirm', requirePermission('reservations.edit'), async (req, res) => {
   try {
     res.json(await confirmReservation(req.params.id, { actor: 'human', user: req.user }));
