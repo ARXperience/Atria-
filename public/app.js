@@ -240,6 +240,46 @@
     return bg;
   }
 
+  // Genera un reporte imprimible (→ "Guardar como PDF" del navegador) con
+  // membrete del hotel. Sin dependencias: abre una ventana con estilos de impresión.
+  function printReport({ title, subtitle = '', meta = [], sections = [] }) {
+    const prop = (state.properties || []).find(p => p.id === state.propertyId) || {};
+    const now = new Date();
+    const fecha = now.toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' });
+    const css = `
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font:13px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a;padding:32px}
+      .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #d8b064;padding-bottom:14px;margin-bottom:22px}
+      .brand{font-size:22px;font-weight:800;letter-spacing:1px}.brand b{color:#c79a4b}
+      .brand-sub{font-size:11px;letter-spacing:2px;color:#888;text-transform:uppercase}
+      .hotel{text-align:right;font-size:12px;color:#444}
+      h1{font-size:19px;margin-bottom:2px}.subtitle{color:#666;font-size:13px;margin-bottom:16px}
+      .meta{font-size:12px;color:#555;margin-bottom:18px}.meta span{margin-right:18px}
+      section{margin-bottom:20px}h2{font-size:14px;color:#c79a4b;border-bottom:1px solid #eee;padding-bottom:5px;margin-bottom:10px}
+      table{width:100%;border-collapse:collapse;font-size:12.5px}
+      th,td{text-align:left;padding:7px 9px;border-bottom:1px solid #eee}
+      th{color:#888;font-weight:600;text-transform:uppercase;font-size:10.5px;letter-spacing:.5px}
+      td.r,th.r{text-align:right}
+      tr.total td{border-top:2px solid #333;font-weight:700}
+      .foot{margin-top:30px;padding-top:12px;border-top:1px solid #eee;font-size:10.5px;color:#999;text-align:center}
+      @media print{body{padding:0}@page{margin:16mm}}
+    `;
+    const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(title)} — ${esc(prop.name || 'Atria')}</title><style>${css}</style></head><body>
+      <div class="head">
+        <div><div class="brand">ATR<b>IA</b></div><div class="brand-sub">Hospitality OS</div></div>
+        <div class="hotel"><b>${esc(prop.name || 'Atria Hotel')}</b><br>${esc(prop.city || '')}<br>Generado: ${esc(fecha)}</div>
+      </div>
+      <h1>${esc(title)}</h1>${subtitle ? `<div class="subtitle">${esc(subtitle)}</div>` : ''}
+      ${meta.length ? `<div class="meta">${meta.map(m => `<span><b>${esc(m.label)}:</b> ${esc(m.value)}</span>`).join('')}</div>` : ''}
+      ${sections.map(s => `<section><h2>${esc(s.title)}</h2>${s.html}</section>`).join('')}
+      <div class="foot">Documento generado por Atria Hospitality OS · ${esc(prop.name || '')} · ${esc(fecha)}</div>
+    </body></html>`;
+    const w = window.open('', '_blank');
+    if (!w) { toast('Permite las ventanas emergentes para exportar el PDF', true); return; }
+    w.document.write(html); w.document.close();
+    w.onload = () => { w.focus(); w.print(); };
+  }
+
   const pid = () => `propertyId=${state.propertyId}`;
 
   // ---------- vistas ----------
@@ -1146,9 +1186,21 @@
       catch (e) { toast(e.message, true); }
     };
     window._apPay = async id => { const s = prompt('Soporte/referencia del pago:'); if (s === null) return; try { await api(`/finance/payables/${id}/pay`, { method: 'POST', body: { support: s } }); toast('Pago registrado'); render(); } catch (e) { toast(e.message, true); } };
+    window._finPrint = () => {
+      const mes = new Date().toLocaleDateString('es-CO', { year: 'numeric', month: 'long' });
+      printReport({
+        title: 'Estado de resultados y cartera', subtitle: `Periodo: ${mes}`,
+        meta: [{ label: 'Ingresos del mes', value: cop(ov.monthIncome) }, { label: 'Egresos', value: cop(ov.monthExpenses) }, { label: 'Resultado', value: cop(ov.monthNet) }],
+        sections: [
+          { title: 'Estado de resultados (P&G)', html: `<table><tr><td>Ingresos</td><td class="r">${cop(pl.income)}</td></tr>${Object.entries(pl.expenses).map(([k, v]) => `<tr><td>− ${esc(k)}</td><td class="r">${cop(v)}</td></tr>`).join('')}<tr class="total"><td>Resultado</td><td class="r">${cop(pl.result)}</td></tr></table>` },
+          { title: `Cartera por cobrar (${ar.rows.length})`, html: ar.rows.length ? `<table><tr><th>Reserva</th><th>Huésped</th><th class="r">Saldo</th></tr>${ar.rows.map(r => `<tr><td>${esc(r.code)}</td><td>${esc(r.guest)}</td><td class="r">${cop(r.balance)}</td></tr>`).join('')}<tr class="total"><td colspan="2">Total cartera</td><td class="r">${cop(ar.total)}</td></tr></table>` : '<p>Sin cartera pendiente.</p>' },
+        ],
+      });
+    };
     setTimeout(animateCounts, 0);
     return `
-      <div class="grid cols-4">
+      <div class="row" style="justify-content:flex-end"><button class="btn ghost small" onclick="_finPrint()">🖨️ Imprimir / PDF</button></div>
+      <div class="grid cols-4 mt">
         <div class="kpi"><div class="label">Ingresos del mes</div><div class="value" style="color:var(--green)"><span data-count="${ov.monthIncome}" data-fmt="cop">$0</span></div></div>
         <div class="kpi"><div class="label">Egresos del mes</div><div class="value"><span data-count="${ov.monthExpenses}" data-fmt="cop">$0</span></div></div>
         <div class="kpi"><div class="label">Resultado</div><div class="value" style="color:${ov.monthNet >= 0 ? 'var(--green)' : 'var(--red)'}"><span data-count="${ov.monthNet}" data-fmt="cop">$0</span></div></div>
@@ -1280,9 +1332,20 @@
     window._ftGen = async () => { try { await api('/fontur/generate', { method: 'POST', body: { propertyId: state.propertyId } }); toast('Contribución del trimestre generada'); render(); } catch (e) { toast(e.message, true); } };
     window._ftFile = async id => { try { await api(`/fontur/${id}/file`, { method: 'POST' }); toast('Contribución presentada'); render(); } catch (e) { toast(e.message, true); } };
     window._ftPay = async id => { const s = prompt('Soporte/referencia del pago FONTUR:'); if (s === null) return; try { await api(`/fontur/${id}/pay`, { method: 'POST', body: { support: s } }); toast('Pago registrado'); render(); } catch (e) { toast(e.message, true); } };
+    window._ftPrint = () => {
+      printReport({
+        title: 'Contribución parafiscal FONTUR', subtitle: `Trimestre ${ov.current.period} · Ley 2068/2020`,
+        meta: [{ label: 'Base operacional', value: cop(ov.current.operatingIncome) }, { label: 'Tarifa', value: `${perMil} por mil` }, { label: 'Contribución', value: cop(ov.current.amount) }],
+        sections: [
+          { title: 'Liquidación del trimestre', html: `<table><tr><td>Base gravable (ingresos operacionales)</td><td class="r">${cop(ov.current.operatingIncome)}</td></tr><tr><td>Tarifa aplicada</td><td class="r">${perMil} × 1000</td></tr><tr class="total"><td>Contribución a pagar</td><td class="r">${cop(ov.current.amount)}</td></tr></table>` },
+          { title: 'Historial de contribuciones', html: ov.contributions.length ? `<table><tr><th>Periodo</th><th class="r">Base</th><th class="r">Contribución</th><th>Estado</th></tr>${ov.contributions.map(c => `<tr><td>${esc(c.period)}</td><td class="r">${cop(c.operatingIncome)}</td><td class="r">${cop(c.amount)}</td><td>${esc(stLabel[c.status] || c.status)}</td></tr>`).join('')}</table>` : '<p>Sin declaraciones registradas.</p>' },
+        ],
+      });
+    };
     setTimeout(animateCounts, 0);
     return `
-      <div class="grid cols-4">
+      <div class="row" style="justify-content:flex-end"><button class="btn ghost small" onclick="_ftPrint()">🖨️ Imprimir / PDF</button></div>
+      <div class="grid cols-4 mt">
         <div class="kpi"><div class="label">Base operacional (${esc(ov.current.period)})</div><div class="value"><span data-count="${ov.current.operatingIncome}" data-fmt="cop">$0</span></div></div>
         <div class="kpi"><div class="label">Tarifa vigente</div><div class="value">${perMil}<small> ×1000</small></div></div>
         <div class="kpi"><div class="label">Contribución estimada</div><div class="value" style="color:var(--yellow)"><span data-count="${ov.current.amount}" data-fmt="cop">$0</span></div></div>
