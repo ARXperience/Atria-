@@ -9,6 +9,8 @@ import { createReview } from '../services/reputation.js';
 import { submitPrecheckin, createGuestRequest, listGuestRequests, payBalanceLink, requestExpressCheckout } from '../services/guestPortal.js';
 import { submitSurvey, getSurveyForReservation } from '../services/surveys.js';
 import { fmtCOP, dayStr, parseDay } from '../lib/util.js';
+import { GUEST_SERVICES, parseServiceList } from '../lib/services.js';
+import { disabledFeatures } from '../services/platform.js';
 import { logger } from '../lib/logger.js';
 
 export const publicRouter = Router();
@@ -47,10 +49,15 @@ publicRouter.get('/hotel/:propertyId/site', async (req, res) => {
   if (site && !site.published) return res.status(404).json({ error: 'Sitio no publicado' });
   const rooms = await roomsContent(property.id);
   const faqs = await listKnowledge(property.id, { visibility: 'public' });
+  // Servicios del hotel de cara al cliente: los que la sede ofrece y no estén
+  // apagados globalmente (§14/§55.1).
+  const enabled = parseServiceList(property.enabledServices); // null = todos
+  const disabled = await disabledFeatures();
+  const services = GUEST_SERVICES.filter(s => (enabled == null || enabled.includes(s.key)) && !disabled.has(s.key));
   res.json({
     hotel: { name: property.name, city: property.city, address: property.address, checkInTime: property.checkInTime, checkOutTime: property.checkOutTime, rnt: property.rnt, whatsapp: property.whatsappNumber },
     site: site ? { heroTitle: site.heroTitle, heroSubtitle: site.heroSubtitle, aboutText: site.aboutText, promoText: site.promoText, heroImage: site.heroImageId ? `/api/public/media/${site.heroImageId}` : null } : {},
-    rooms, faqs: faqs.map(f => ({ title: f.title, content: f.content, category: f.category })),
+    rooms, services, faqs: faqs.map(f => ({ title: f.title, content: f.content, category: f.category })),
   });
 });
 

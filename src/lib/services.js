@@ -29,6 +29,15 @@ export const CORE_DOMAINS = new Set(['dashboard', 'approvals', 'audit', 'setting
 
 export const SERVICE_KEYS = SERVICES.map((s) => s.key);
 
+// Servicios de cara al huésped, para reflejarlos en el sitio público (§14/§55.1).
+// Subconjunto del catálogo con etiqueta e ícono amables para el cliente. Solo se
+// muestran los que la sede tiene habilitados (y no estén apagados globalmente).
+export const GUEST_SERVICES = [
+  { key: 'reservations', icon: '🛏️', label: 'Alojamiento', blurb: 'Habitaciones cómodas y reserva directa sin comisiones.' },
+  { key: 'restaurant', icon: '🍽️', label: 'Restaurante', blurb: 'Gastronomía y experiencias dentro del hotel.' },
+  { key: 'events', icon: '🎉', label: 'Eventos y salones', blurb: 'Bodas, reuniones y celebraciones a tu medida.' },
+];
+
 // Mapa inverso dominio -> clave de servicio.
 export const DOMAIN_SERVICE = (() => {
   const m = {};

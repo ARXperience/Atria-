@@ -1142,6 +1142,26 @@ async function main() {
       assert.ok(data.rooms.length >= 3 && data.hotel.name);
     });
 
+    await test('el sitio público refleja los servicios del hotel para el cliente', async () => {
+      const res = await fetch(`${BASE}/api/public/hotel/${propertyId}/site`);
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.ok(Array.isArray(data.services) && data.services.length >= 1, 'debe incluir servicios de cara al cliente');
+      assert.ok(data.services.every(s => s.key && s.label && s.icon), 'cada servicio con etiqueta e ícono');
+      assert.ok(data.services.find(s => s.key === 'reservations'), 'alojamiento siempre presente');
+    });
+
+    await test('un servicio apagado globalmente no se muestra en el sitio público', async () => {
+      const { data: sa } = await api('/api/auth/login', { method: 'POST', body: { email: 'superadmin@atria.co', password: 'atria2026' } });
+      const SH = { 'content-type': 'application/json', authorization: `Bearer ${sa.token}` };
+      await fetch(`${BASE}/api/saas/features/events`, { method: 'POST', headers: SH, body: JSON.stringify({ enabled: false }) });
+      const off = await (await fetch(`${BASE}/api/public/hotel/${propertyId}/site`)).json();
+      assert.ok(!off.services.find(s => s.key === 'events'), 'eventos no debe aparecer si está apagado');
+      await fetch(`${BASE}/api/saas/features/events`, { method: 'POST', headers: SH, body: JSON.stringify({ enabled: true }) });
+      const on = await (await fetch(`${BASE}/api/public/hotel/${propertyId}/site`)).json();
+      assert.ok(on.services.find(s => s.key === 'events'), 'eventos vuelve al reactivarse');
+    });
+
     // ===== IA-2 / IA-3: persona del agente, conocimiento y guardrails =====
     await test('agente existe con persona por defecto y es configurable', async () => {
       const { status, data } = await api(`/api/content/agents?propertyId=${propertyId}`);
