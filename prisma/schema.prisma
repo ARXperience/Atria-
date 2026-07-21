@@ -600,6 +600,10 @@ model AgentProfile {
   enabledTools  String   @default("*")  // CSV de herramientas permitidas o "*"
   knowledgeScope String  @default("public") // public | internal
   active        Boolean  @default(true)
+  // Comportamiento proactivo del asistente en el sitio público (§14/§41).
+  proactive      Boolean @default(true)  // muestra la burbuja de bienvenida al entrar
+  welcomeMessage String? // texto de la burbuja proactiva (null = por defecto)
+  suggestions    String? // sugerencias rápidas (JSON array o CSV; null = por defecto)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

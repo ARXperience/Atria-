@@ -60,6 +60,9 @@
     .ha-msg{max-width:82%;padding:9px 13px;border-radius:13px;font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
     .ha-msg.in{background:var(--surface2);align-self:flex-start;border-bottom-left-radius:4px}
     .ha-msg.out{background:linear-gradient(135deg,#2c445f,#24384e);align-self:flex-end;border-bottom-right-radius:4px}
+    .ha-chips{display:flex;flex-wrap:wrap;gap:7px;padding:0 12px 4px}
+    .ha-chip{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:999px;padding:6px 12px;font-size:12.5px;cursor:pointer}
+    .ha-chip:hover{border-color:var(--accent);color:var(--accent-hi)}
     .ha-input{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--border)}
     .ha-input input{flex:1;min-width:0}
     .ha-coach{max-width:290px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.4);padding:12px 13px}
@@ -124,15 +127,19 @@
     function mountAssistant(){
       if(document.getElementById('haDock')) return;
       const name = (DATA&&DATA.hotel&&DATA.hotel.name)||'nuestro hotel';
+      const cfg = (DATA&&DATA.assistant)||{proactive:true,welcome:'',suggestions:[]};
+      if(cfg.proactive===false && cfg.displayName===undefined){ /* asistente inactivo */ return; }
+      const chips = (cfg.suggestions||[]).map(s=>`<button class="ha-chip">${esc(s)}</button>`).join('');
       const d=document.createElement('div'); d.className='ha'; d.id='haDock';
       d.innerHTML=`
-        <div class="ha-coach" id="haCoach">
-          <p>¿Necesitas ayuda? Pregúntame por habitaciones, precios, servicios o cómo reservar. 😊</p>
+        <div class="ha-coach" id="haCoach" ${cfg.proactive===false?'hidden':''}>
+          <p>${esc(cfg.welcome||'¿Necesitas ayuda? Pregúntame por habitaciones, precios y servicios. 😊')}</p>
           <div class="row"><button class="btn" id="haCoachOpen">Chatear ahora</button><button class="mini" id="haCoachX">Ahora no</button></div>
         </div>
         <div class="ha-panel" id="haPanel" hidden>
           <div class="ha-head"><div><b>Asistente · ${esc(name)}</b><div class="s">Respondo al instante</div></div><button class="ha-x" id="haClose">✕</button></div>
           <div class="ha-body" id="haBody"></div>
+          ${chips?`<div class="ha-chips" id="haChips">${chips}</div>`:''}
           <div class="ha-input"><input id="haText" placeholder="Escribe tu mensaje…" autocomplete="off"><button class="btn" id="haSend">Enviar</button></div>
         </div>
         <button class="ha-fab" id="haFab" aria-label="Abrir asistente">💬</button>`;
@@ -145,7 +152,8 @@
       d.querySelector('#haClose').onclick=close;
       d.querySelector('#haCoachOpen').onclick=open;
       d.querySelector('#haCoachX').onclick=()=>{coach.hidden=true;};
-      setTimeout(()=>{coach.hidden=true;},14000);
+      if(cfg.proactive!==false) setTimeout(()=>{coach.hidden=true;},14000);
+      d.querySelectorAll('.ha-chip').forEach(ch=>{ch.onclick=()=>{ if(panel.hidden) open(); d.querySelector('#haText').value=ch.textContent; send(); };});
       const send=async()=>{
         const inp=d.querySelector('#haText'); const text=inp.value.trim(); if(!text) return; inp.value='';
         add(text,'out');

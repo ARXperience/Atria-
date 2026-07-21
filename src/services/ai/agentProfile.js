@@ -4,6 +4,31 @@ import { prisma } from '../../db.js';
 
 export const AGENT_SCOPES = ['guest', 'reception', 'housekeeping', 'maintenance', 'sales', 'finance', 'payroll', 'manager'];
 
+// Configuración proactiva por defecto del asistente de huéspedes en el sitio (§14).
+export const GUEST_PROACTIVE_DEFAULT = {
+  welcomeMessage: '¿Necesitas ayuda? Pregúntame por habitaciones, precios, servicios o cómo reservar. 😊',
+  suggestions: ['Ver disponibilidad', 'Servicios del hotel', '¿Dónde están ubicados?', 'Hablar con una persona'],
+};
+
+// Normaliza las sugerencias almacenadas (JSON array o CSV) a un array de textos.
+export function parseSuggestions(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  try { const p = JSON.parse(s); if (Array.isArray(p)) return p.map(x => String(x).trim()).filter(Boolean).slice(0, 6); } catch { /* CSV */ }
+  return s.split(/[\n,]/).map(x => x.trim()).filter(Boolean).slice(0, 6);
+}
+
+// Config efectiva (proactivo + bienvenida + sugerencias) para el sitio público.
+export function guestAssistantConfig(profile) {
+  return {
+    displayName: profile.displayName,
+    proactive: profile.proactive !== false,
+    welcome: profile.welcomeMessage || GUEST_PROACTIVE_DEFAULT.welcomeMessage,
+    suggestions: parseSuggestions(profile.suggestions) || GUEST_PROACTIVE_DEFAULT.suggestions,
+  };
+}
+
 const DEFAULTS = {
   guest: {
     displayName: 'Atria',

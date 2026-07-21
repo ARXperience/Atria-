@@ -23,8 +23,10 @@ contentRouter.get('/agents', requirePermission('content.view'), async (req, res)
 contentRouter.patch('/agents/:id', requirePermission('content.manage'), async (req, res) => {
   const profile = await prisma.agentProfile.findUnique({ where: { id: req.params.id } });
   if (!profile || !propertyScope(req, profile.propertyId)) return res.status(404).json({ error: 'Agente no encontrado' });
-  const allowed = ['displayName', 'persona', 'tone', 'languages', 'emojis', 'greeting', 'domainOnly', 'llmEnabled', 'enabledTools', 'knowledgeScope', 'active'];
+  const allowed = ['displayName', 'persona', 'tone', 'languages', 'emojis', 'greeting', 'domainOnly', 'llmEnabled', 'enabledTools', 'knowledgeScope', 'active', 'proactive', 'welcomeMessage', 'suggestions'];
   const data = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
+  // Las sugerencias pueden llegar como array; se persisten como JSON string.
+  if (Array.isArray(data.suggestions)) data.suggestions = JSON.stringify(data.suggestions.map(x => String(x).trim()).filter(Boolean).slice(0, 6));
   const updated = await prisma.agentProfile.update({ where: { id: profile.id }, data });
   await audit({ propertyId: profile.propertyId, user: req.user, action: 'agent.configured', entity: 'AgentProfile', entityId: profile.id, after: data });
   res.json(updated);

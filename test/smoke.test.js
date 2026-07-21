@@ -1162,6 +1162,27 @@ async function main() {
       assert.ok(on.services.find(s => s.key === 'events'), 'eventos vuelve al reactivarse');
     });
 
+    await test('el sitio expone la configuración proactiva del asistente (por defecto)', async () => {
+      const data = await (await fetch(`${BASE}/api/public/hotel/${propertyId}/site`)).json();
+      assert.ok(data.assistant, 'incluye config del asistente');
+      assert.equal(data.assistant.proactive, true, 'proactivo por defecto');
+      assert.ok(data.assistant.welcome && data.assistant.welcome.length > 0, 'mensaje de bienvenida por defecto');
+      assert.ok(Array.isArray(data.assistant.suggestions) && data.assistant.suggestions.length >= 1, 'sugerencias por defecto');
+    });
+
+    await test('el hotel configura el asistente proactivo y el sitio lo refleja', async () => {
+      const agents = await api(`/api/content/agents?propertyId=${propertyId}`);
+      const guest = agents.data.find(a => a.scope === 'guest');
+      const upd = await api(`/api/content/agents/${guest.id}`, { method: 'PATCH', body: { proactive: false, welcomeMessage: '¡Bienvenido! ¿Reservamos?', suggestions: ['Ver tarifas', 'Ubicación'] } });
+      assert.equal(upd.status, 200);
+      const data = await (await fetch(`${BASE}/api/public/hotel/${propertyId}/site`)).json();
+      assert.equal(data.assistant.proactive, false, 'respeta proactivo desactivado');
+      assert.equal(data.assistant.welcome, '¡Bienvenido! ¿Reservamos?');
+      assert.deepEqual(data.assistant.suggestions, ['Ver tarifas', 'Ubicación']);
+      // Restaurar valores por defecto (null => defaults).
+      await api(`/api/content/agents/${guest.id}`, { method: 'PATCH', body: { proactive: true, welcomeMessage: null, suggestions: null } });
+    });
+
     // ===== IA-2 / IA-3: persona del agente, conocimiento y guardrails =====
     await test('agente existe con persona por defecto y es configurable', async () => {
       const { status, data } = await api(`/api/content/agents?propertyId=${propertyId}`);

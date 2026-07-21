@@ -1666,12 +1666,16 @@
   async function viewAgent() {
     const agents = await get(`/content/agents?${pid()}`);
     const guest = agents.find(a => a.scope === 'guest') || agents[0];
+    // Sugerencias almacenadas (JSON o CSV) -> texto (una por línea) para editar.
+    const parseSug = (raw) => { if (!raw) return []; try { const p = JSON.parse(raw); if (Array.isArray(p)) return p; } catch { /* csv */ } return String(raw).split(/[\n,]/).map(s => s.trim()).filter(Boolean); };
     window._saveAgent = async () => {
       try {
+        const suggestions = $('#agSug').value.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 6);
         await api(`/content/agents/${guest.id}`, { method: 'PATCH', body: {
           displayName: $('#agName').value, tone: $('#agTone').value, persona: $('#agPersona').value,
           languages: $('#agLangs').value, greeting: $('#agGreeting').value,
           emojis: $('#agEmojis').checked, domainOnly: $('#agDomain').checked, llmEnabled: $('#agLlm').checked,
+          proactive: $('#agProactive').checked, welcomeMessage: $('#agWelcome').value.trim() || null, suggestions,
         }});
         toast('Agente actualizado'); render();
       } catch (err) { toast(err.message, true); }
@@ -1699,6 +1703,12 @@
             <label class="fit" style="margin:0"><input type="checkbox" id="agDomain" ${guest.domainOnly ? 'checked' : ''} style="width:auto"> Solo habla del hotel</label>
             <label class="fit" style="margin:0"><input type="checkbox" id="agLlm" ${guest.llmEnabled ? 'checked' : ''} style="width:auto"> IA natural (Claude)</label>
           </div>
+          <hr style="border-color:var(--border);margin:16px 0 12px">
+          <h3 style="font-size:15px">Comportamiento en el sitio web</h3>
+          <p class="muted" style="font-size:12px;margin-bottom:10px">Cómo saluda y sugiere el asistente a los clientes en la página pública del hotel.</p>
+          <label style="margin:0"><input type="checkbox" id="agProactive" ${guest.proactive !== false ? 'checked' : ''} style="width:auto"> Saludo proactivo al entrar (burbuja de bienvenida)</label>
+          <label class="mt">Mensaje de bienvenida</label><input id="agWelcome" value="${esc(guest.welcomeMessage || '')}" placeholder="¿Necesitas ayuda? Pregúntame por habitaciones, precios y servicios. 😊">
+          <label class="mt">Sugerencias rápidas (una por línea)</label><textarea id="agSug" rows="4" placeholder="Ver disponibilidad&#10;Servicios del hotel&#10;¿Dónde están ubicados?&#10;Hablar con una persona">${esc(parseSug(guest.suggestions).join('\n'))}</textarea>
           <button class="btn mt" onclick="_saveAgent()">Guardar configuración</button>
         </div>
         <div class="card"><h3>Herramientas que controla</h3>

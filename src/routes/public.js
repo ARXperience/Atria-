@@ -54,10 +54,14 @@ publicRouter.get('/hotel/:propertyId/site', async (req, res) => {
   const enabled = parseServiceList(property.enabledServices); // null = todos
   const disabled = await disabledFeatures();
   const services = GUEST_SERVICES.filter(s => (enabled == null || enabled.includes(s.key)) && !disabled.has(s.key));
+  // Config del asistente proactivo (bienvenida + sugerencias), configurable por el hotel.
+  const { getAgentProfile, guestAssistantConfig } = await import('../services/ai/agentProfile.js');
+  const guestProfile = await getAgentProfile(property.id, 'guest');
+  const assistant = guestProfile.active ? guestAssistantConfig(guestProfile) : { proactive: false, suggestions: [], welcome: '', displayName: guestProfile.displayName };
   res.json({
     hotel: { name: property.name, city: property.city, address: property.address, checkInTime: property.checkInTime, checkOutTime: property.checkOutTime, rnt: property.rnt, whatsapp: property.whatsappNumber },
     site: site ? { heroTitle: site.heroTitle, heroSubtitle: site.heroSubtitle, aboutText: site.aboutText, promoText: site.promoText, heroImage: site.heroImageId ? `/api/public/media/${site.heroImageId}` : null } : {},
-    rooms, services, faqs: faqs.map(f => ({ title: f.title, content: f.content, category: f.category })),
+    rooms, services, assistant, faqs: faqs.map(f => ({ title: f.title, content: f.content, category: f.category })),
   });
 });
 
