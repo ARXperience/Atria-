@@ -477,3 +477,8 @@ code { background: var(--bg-elev); padding: 1px 6px; border-radius: 5px; font-si
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
 }
+
+/* Consola de áreas & accesos (§55.1): rejilla de checkboxes de servicios. */
+.chkgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px 14px; }
+label.chk { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; white-space: normal; }
+label.chk input { width: auto; margin: 0; flex: 0 0 auto; }

@@ -90,6 +90,10 @@ model Property {
   timezone    String   @default("America/Bogota")
   whatsappNumber String?
   active      Boolean  @default(true)
+  // Servicios/áreas habilitados en esta sede (§55.1). JSON array de claves de
+  // servicio; null = todos los servicios disponibles. Cada hotel puede ofrecer
+  // un subconjunto distinto (no todos prestan restaurante, eventos, etc.).
+  enabledServices String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -123,6 +127,10 @@ model User {
   role         String   // OWNER | MANAGER | FRONTDESK | SALES | HOUSEKEEPING | MAINTENANCE | ACCOUNTING | HR | AUDITOR
   propertyIds  String   @default("*") // "*" = todas las sedes, o lista CSV de ids
   active       Boolean  @default(true)
+  // Áreas/servicios a los que el usuario tiene acceso (§55.1). JSON array de
+  // claves de servicio; null = todas las áreas que su rol permite. El superadmin
+  // define por usuario qué áreas puede ver, más allá de lo que dicta el rol.
+  allowedServices String?
   isSuperAdmin Boolean  @default(false) // superadministrador SaaS (§55.1)
   lastLoginAt  DateTime?
   // Seguridad avanzada (§55.3)

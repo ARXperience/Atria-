@@ -5,6 +5,8 @@
     token: localStorage.getItem('atria_token'),
     user: JSON.parse(localStorage.getItem('atria_user') || 'null'),
     permissions: JSON.parse(localStorage.getItem('atria_perms') || '[]'),
+    services: JSON.parse(localStorage.getItem('atria_services') || '[]'),
+    allowedServices: JSON.parse(localStorage.getItem('atria_allowed') || 'null'),
     company: JSON.parse(localStorage.getItem('atria_company') || 'null'),
     properties: JSON.parse(localStorage.getItem('atria_props') || '[]'),
     propertyId: localStorage.getItem('atria_prop') || null,
@@ -157,10 +159,14 @@
         }
         state.token = data.token; state.user = data.user; state.properties = data.properties; state.company = data.company;
         state.permissions = data.permissions || [];
+        state.services = data.services || [];
+        state.allowedServices = data.allowedServices || null;
         state.propertyId = data.properties[0]?.id || null;
         localStorage.setItem('atria_token', data.token);
         localStorage.setItem('atria_user', JSON.stringify(data.user));
         localStorage.setItem('atria_perms', JSON.stringify(state.permissions));
+        localStorage.setItem('atria_services', JSON.stringify(state.services));
+        localStorage.setItem('atria_allowed', JSON.stringify(state.allowedServices));
         localStorage.setItem('atria_company', JSON.stringify(data.company || null));
         localStorage.setItem('atria_props', JSON.stringify(data.properties));
         localStorage.setItem('atria_prop', state.propertyId || '');
@@ -178,13 +184,40 @@
   }
 
   // ---------- shell ----------
-  // ¿El rol del usuario tiene el permiso? Espeja la lógica del backend (wildcards).
+  // Dominios de núcleo: no dependen de ningún servicio contratable (siempre visibles
+  // si el rol los permite). Espeja CORE_DOMAINS del backend.
+  const CORE_DOMAINS = new Set(['dashboard', 'approvals', 'audit', 'settings', 'notifications', 'users']);
+  // Mapa dominio -> clave de servicio, derivado del catálogo que envía el backend.
+  function domainService(domain) {
+    for (const s of (state.services || [])) if ((s.domains || []).includes(domain)) return s.key;
+    return null;
+  }
+  // Servicios habilitados en la sede activa (null/ausente => todos).
+  function activePropertyServices() {
+    const p = (state.properties || []).find(x => x.id === state.propertyId);
+    return p && Array.isArray(p.enabledServices) ? p.enabledServices : null;
+  }
+  // ¿El rol del usuario tiene el permiso? Espeja la lógica del backend (wildcards)
+  // y además respeta el servicio: el área debe estar asignada al usuario y
+  // habilitada en la sede activa (§55.1).
   function can(perm) {
     if (!perm) return true;
+    if (state.user?.isSuperAdmin) return true;
     const perms = state.permissions || [];
-    if (perms.includes('*') || state.user?.isSuperAdmin) return true;
-    if (perms.includes(perm)) return true;
-    return perms.includes(`${perm.split('.')[0]}.*`);
+    const roleOk = perms.includes('*') || perms.includes(perm) || perms.includes(`${perm.split('.')[0]}.*`);
+    if (!roleOk) return false;
+    if (perm === '__superadmin') return false;
+    // Gating por servicio.
+    const domain = perm.split('.')[0];
+    if (CORE_DOMAINS.has(domain)) return true;
+    const service = domainService(domain);
+    if (!service) return true; // dominio no mapeado a un servicio: no se restringe
+    // A nivel usuario (áreas asignadas por el superadmin).
+    if (Array.isArray(state.allowedServices) && !state.allowedServices.includes(service)) return false;
+    // A nivel sede (servicios contratados en la sede activa).
+    const propServices = activePropertyServices();
+    if (propServices && !propServices.includes(service)) return false;
+    return true;
   }
   // Permiso requerido por cada módulo del menú (para adaptar la navegación al área).
   const NAV_PERM = {
@@ -3275,10 +3308,63 @@
   }
 
   async function viewSaasAdmin() {
-    const [companies, plans, billing] = await Promise.all([get('/saas/companies'), get('/saas/plans'), get('/saas/billing').catch(() => null)]);
+    const [companies, plans, billing, svcCat] = await Promise.all([get('/saas/companies'), get('/saas/plans'), get('/saas/billing').catch(() => null), get('/saas/services').catch(() => ({ services: [] }))]);
+    const SVC = svcCat.services || [];
     const stLabel = { trial: 'Prueba', active: 'Activa', suspended: 'Suspendida', cancelled: 'Cancelada' };
     const stColor = { trial: 'yellow', active: 'green', suspended: 'red', cancelled: 'gray' };
     const invColor = { pending: 'yellow', paid: 'green', overdue: 'red', void: 'gray' };
+    const roleLabel = { OWNER: 'Propietario', MANAGER: 'Administrador', FRONTDESK: 'Recepción', SALES: 'Ventas', HOUSEKEEPING: 'Housekeeping', MAINTENANCE: 'Mantenimiento', ACCOUNTING: 'Contabilidad', HR: 'Talento humano', AUDITOR: 'Auditor' };
+    // Consola de áreas & accesos (§55.1): servicios por sede y áreas por usuario.
+    window._saasAccess = async (companyId, companyName) => {
+      try {
+        const [props, users] = await Promise.all([get(`/saas/companies/${companyId}/properties`), get(`/saas/companies/${companyId}/users`)]);
+        const svcChecks = (selected) => SVC.map(s => `<label class="chk"><input type="checkbox" value="${s.key}" ${selected.includes(s.key) ? 'checked' : ''}> ${esc(s.label)}</label>`).join('');
+        const propBlocks = props.map(p => `
+          <div class="card mt" data-prop="${p.id}">
+            <div class="row" style="justify-content:space-between"><b>${esc(p.name)}${p.city ? ` · ${esc(p.city)}` : ''}</b>
+              <button class="btn small ghost" onclick="_svcAll(this,'prop','${p.id}')">Ofrecer todos</button></div>
+            <div class="chkgrid mt">${svcChecks(p.enabledServices || [])}</div>
+            <div class="right mt"><button class="btn small" onclick="_saveProp('${p.id}',this)">Guardar sede</button></div>
+          </div>`).join('');
+        const userBlocks = users.map(u => u.isSuperAdmin ? `
+          <div class="card mt"><div class="row" style="justify-content:space-between"><b>${esc(u.name)}</b>${badge('Superadmin · acceso total', 'accent')}</div>
+            <p class="muted" style="font-size:12px">El superadministrador accede a todas las funciones y áreas.</p></div>` : `
+          <div class="card mt" data-user="${u.id}">
+            <div class="row" style="justify-content:space-between"><b>${esc(u.name)}</b><span class="muted" style="font-size:12px">${esc(u.email)} · ${esc(roleLabel[u.role] || u.role)}</span></div>
+            <label class="chk mt"><input type="checkbox" ${u.allowedServices == null ? 'checked' : ''} onchange="_userAllToggle(this)"> Todas las áreas que permite su rol</label>
+            <div class="chkgrid mt" style="${u.allowedServices == null ? 'opacity:.5;pointer-events:none' : ''}">${svcChecks(u.allowedServices || [])}</div>
+            <div class="right mt"><button class="btn small" onclick="_saveUser('${u.id}',this)">Guardar accesos</button></div>
+          </div>`).join('');
+        modal(`<h3>Áreas & accesos · ${esc(companyName)}</h3>
+          <p class="muted" style="font-size:13px">Define qué servicios ofrece cada sede y a qué áreas accede cada usuario. Cada sede puede prestar servicios distintos.</p>
+          <h4 class="mt">Servicios por sede</h4>${propBlocks || '<p class="muted">Sin sedes.</p>'}
+          <h4 class="mt">Accesos por usuario</h4>${userBlocks || '<p class="muted">Sin usuarios.</p>'}
+          <div class="right mt"><button class="btn secondary" onclick="this.closest('.modal-bg').remove()">Cerrar</button></div>`);
+      } catch (e) { toast(e.message, true); }
+    };
+    window._svcAll = (btn, kind, id) => {
+      const grid = btn.closest('[data-prop],[data-user]').querySelector('.chkgrid');
+      grid.querySelectorAll('input[type=checkbox]').forEach(c => { c.checked = true; });
+    };
+    window._userAllToggle = (chk) => {
+      const grid = chk.closest('[data-user]').querySelector('.chkgrid');
+      grid.style.opacity = chk.checked ? '.5' : '1';
+      grid.style.pointerEvents = chk.checked ? 'none' : 'auto';
+    };
+    window._saveProp = async (id, btn) => {
+      const grid = btn.closest('[data-prop]').querySelector('.chkgrid');
+      const keys = [...grid.querySelectorAll('input:checked')].map(c => c.value);
+      const all = keys.length === SVC.length;
+      try { await api(`/saas/properties/${id}/services`, { method: 'POST', body: all ? { all: true } : { enabledServices: keys } }); toast('Servicios de la sede actualizados'); }
+      catch (e) { toast(e.message, true); }
+    };
+    window._saveUser = async (id, btn) => {
+      const card = btn.closest('[data-user]');
+      const allRole = card.querySelector('label.chk input').checked;
+      const keys = [...card.querySelectorAll('.chkgrid input:checked')].map(c => c.value);
+      try { await api(`/saas/users/${id}/access`, { method: 'POST', body: { allowedServices: allRole ? null : keys } }); toast('Accesos del usuario actualizados'); }
+      catch (e) { toast(e.message, true); }
+    };
     window._saasPlan = async (id, code) => { try { await api(`/saas/companies/${id}/plan`, { method: 'POST', body: { planCode: code } }); toast('Plan actualizado'); render(); } catch (e) { toast(e.message, true); } };
     window._saasStatus = async (id, status) => { try { await api(`/saas/companies/${id}/status`, { method: 'POST', body: { status } }); toast('Estado actualizado'); render(); } catch (e) { toast(e.message, true); } };
     window._saasGenInvoices = async () => { try { const r = await api('/saas/billing/generate', { method: 'POST' }); toast(`${r.created} factura(s) emitida(s)`); render(); } catch (e) { toast(e.message, true); } };
@@ -3299,7 +3385,8 @@
           <td><select onchange="_saasPlan('${c.id}', this.value)" style="width:auto">${plans.map(p => `<option value="${p.code}" ${p.code === c.planCode ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></td>
           <td>${badge(stLabel[c.subStatus] || c.subStatus, stColor[c.subStatus] || 'gray')}</td>
           <td>${c.users}</td><td>${c.properties}</td>
-          <td>${c.subStatus === 'suspended' ? `<button class="btn small" onclick="_saasStatus('${c.id}','active')">Reactivar</button>` : `<button class="btn small ghost danger" onclick="_saasStatus('${c.id}','suspended')">Suspender</button>`}</td>
+          <td><div class="row"><button class="btn small ghost" onclick="_saasAccess('${c.id}','${esc(c.name).replace(/'/g, "\\'")}')">Áreas & accesos</button>
+          ${c.subStatus === 'suspended' ? `<button class="btn small" onclick="_saasStatus('${c.id}','active')">Reactivar</button>` : `<button class="btn small ghost danger" onclick="_saasStatus('${c.id}','suspended')">Suspender</button>`}</div></td>
         </tr>`).join('')}</table>
       </div>
       ${billing ? `<div class="card mt"><h3>Facturación del software</h3>
@@ -3549,5 +3636,27 @@
     render();
   });
 
+  // Rehidrata permisos/servicios/sedes desde el servidor al arrancar, para que los
+  // cambios de acceso hechos por el superadmin se reflejen sin reingresar (§55.1).
+  async function hydrate() {
+    if (!state.token) return;
+    try {
+      const data = await get('/auth/me');
+      state.user = data.user; state.permissions = data.permissions || [];
+      state.services = data.services || state.services; state.allowedServices = data.allowedServices ?? null;
+      state.properties = data.properties || state.properties; state.company = data.company || state.company;
+      if (!state.properties.find(p => p.id === state.propertyId)) state.propertyId = state.properties[0]?.id || null;
+      localStorage.setItem('atria_user', JSON.stringify(state.user));
+      localStorage.setItem('atria_perms', JSON.stringify(state.permissions));
+      localStorage.setItem('atria_services', JSON.stringify(state.services));
+      localStorage.setItem('atria_allowed', JSON.stringify(state.allowedServices));
+      localStorage.setItem('atria_props', JSON.stringify(state.properties));
+      localStorage.setItem('atria_prop', state.propertyId || '');
+      applyBranding(state.company);
+      render();
+    } catch { /* sesión expirada: el guard de render se encarga */ }
+  }
+
   render();
+  hydrate();
 })();

@@ -2640,6 +2640,60 @@ async function main() {
       assert.equal(ok.status, 200, 'tras reactivar, la API responde de nuevo');
     });
 
+    // ===== Áreas & accesos: servicios por sede y por usuario (§55.1) =====
+    await test('el superadmin expone el catálogo de servicios y accede a todo', async () => {
+      const { data: sa } = await api('/api/auth/login', { method: 'POST', body: { email: 'superadmin@atria.co', password: 'atria2026' } });
+      const SH = { 'content-type': 'application/json', authorization: `Bearer ${sa.token}` };
+      const cat = await (await fetch(`${BASE}/api/saas/services`, { headers: SH })).json();
+      assert.ok(Array.isArray(cat.services) && cat.services.length >= 10, 'catálogo de servicios');
+      // El superadmin ve todas las áreas de cada sede.
+      assert.ok(Array.isArray(sa.allowedServices) && sa.allowedServices.length === cat.services.length);
+      assert.ok(sa.properties.every(p => Array.isArray(p.enabledServices) && p.enabledServices.length === cat.services.length));
+    });
+
+    await test('el superadmin limita los servicios de una sede y bloquea lo no contratado', async () => {
+      const { data: sa } = await api('/api/auth/login', { method: 'POST', body: { email: 'superadmin@atria.co', password: 'atria2026' } });
+      const SH = { 'content-type': 'application/json', authorization: `Bearer ${sa.token}` };
+      // La sede solo ofrece reservas → CRM no está habilitado.
+      const set = await fetch(`${BASE}/api/saas/properties/${propertyId}/services`, { method: 'POST', headers: SH, body: JSON.stringify({ enabledServices: ['reservations'] }) });
+      assert.equal(set.status, 200);
+      // El gerente (crm.*) queda bloqueado en CRM para esa sede.
+      const blocked = await fetch(`${BASE}/api/crm/corporate?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${token}` } });
+      assert.equal(blocked.status, 403, 'servicio no habilitado en la sede');
+      // Reservas sí funciona.
+      const ok = await fetch(`${BASE}/api/admin/rooms?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${token}` } });
+      assert.equal(ok.status, 200);
+      // El superadmin nunca queda bloqueado.
+      const saOk = await fetch(`${BASE}/api/crm/corporate?propertyId=${propertyId}`, { headers: SH });
+      assert.equal(saOk.status, 200, 'el superadmin accede aunque el servicio no esté contratado');
+      // Reponer todos los servicios de la sede.
+      const reset = await fetch(`${BASE}/api/saas/properties/${propertyId}/services`, { method: 'POST', headers: SH, body: JSON.stringify({ all: true }) });
+      assert.equal(reset.status, 200);
+      const after = await fetch(`${BASE}/api/crm/corporate?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${token}` } });
+      assert.equal(after.status, 200, 'tras reponer, el CRM vuelve a estar disponible');
+    });
+
+    await test('el superadmin acota las áreas de un usuario y el login las refleja', async () => {
+      const { data: sa } = await api('/api/auth/login', { method: 'POST', body: { email: 'superadmin@atria.co', password: 'atria2026' } });
+      const SH = { 'content-type': 'application/json', authorization: `Bearer ${sa.token}` };
+      const companies = await (await fetch(`${BASE}/api/saas/companies`, { headers: SH })).json();
+      const users = await (await fetch(`${BASE}/api/saas/companies/${companies[0].id}/users`, { headers: SH })).json();
+      const ventas = users.find(u => u.email === 'ventas@atria.co');
+      assert.ok(ventas, 'usuario de ventas existe');
+      // Limitar al usuario a solo Reservas (sin CRM), pese a que su rol lo permita.
+      const lim = await fetch(`${BASE}/api/saas/users/${ventas.id}/access`, { method: 'POST', headers: SH, body: JSON.stringify({ allowedServices: ['reservations'] }) });
+      assert.equal(lim.status, 200);
+      const login = await api('/api/auth/login', { method: 'POST', body: { email: 'ventas@atria.co', password: 'atria2026' } });
+      assert.deepEqual(login.data.allowedServices, ['reservations'], 'el login refleja las áreas asignadas');
+      const blocked = await fetch(`${BASE}/api/crm/corporate?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${login.data.token}` } });
+      assert.equal(blocked.status, 403, 'área no habilitada para el usuario');
+      // Restaurar acceso pleno del rol (null = todas las áreas que permite el rol).
+      const restore = await fetch(`${BASE}/api/saas/users/${ventas.id}/access`, { method: 'POST', headers: SH, body: JSON.stringify({ allowedServices: null }) });
+      assert.equal(restore.status, 200);
+      const login2 = await api('/api/auth/login', { method: 'POST', body: { email: 'ventas@atria.co', password: 'atria2026' } });
+      assert.equal(login2.data.allowedServices.length > 1, true, 'restaurado a todas las áreas del rol');
+    });
+
     // ===== White-label (§55.1) =====
     await test('el administrador configura la marca y el login la devuelve', async () => {
       const r = await api('/api/saas/branding', { method: 'POST', body: { commercialName: 'Grupo Hotelero Andes', brandColor: '#3b82f6' } });

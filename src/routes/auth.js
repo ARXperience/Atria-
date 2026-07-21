@@ -8,14 +8,28 @@ import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/util.js';
 import { validatePassword } from '../lib/password.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../lib/totp.js';
+import { SERVICES, SERVICE_KEYS, parseServiceList } from '../lib/services.js';
 
 export const authRouter = Router();
 
 async function accessibleProperties(user) {
-  return prisma.property.findMany({
+  const props = await prisma.property.findMany({
     where: { companyId: user.companyId, ...(user.propertyIds === '*' ? {} : { id: { in: user.propertyIds.split(',') } }) },
-    select: { id: true, name: true, city: true },
+    select: { id: true, name: true, city: true, enabledServices: true },
   });
+  // El superadmin ve todas las áreas de cada sede; los demás, solo las contratadas.
+  return props.map((p) => ({
+    id: p.id, name: p.name, city: p.city,
+    enabledServices: user.isSuperAdmin ? SERVICE_KEYS : (parseServiceList(p.enabledServices) ?? SERVICE_KEYS),
+  }));
+}
+
+// Áreas disponibles para el usuario (§55.1): el rol define el techo, el superadmin
+// puede acotarlas por usuario. null en allowedServices = todas las que el rol permite.
+function userServices(user) {
+  if (user.isSuperAdmin) return SERVICE_KEYS;
+  const allowed = parseServiceList(user.allowedServices);
+  return allowed == null ? SERVICE_KEYS : allowed;
 }
 
 async function companyBranding(companyId) {
@@ -47,6 +61,8 @@ authRouter.post('/login', async (req, res) => {
     token: await issueSession(user, req),
     user: { id: user.id, name: user.name, email: user.email, role: user.role, twoFactorEnabled: user.twoFactorEnabled, isSuperAdmin: user.isSuperAdmin },
     permissions: permissionsForRole(user.role),
+    services: SERVICES,
+    allowedServices: userServices(user),
     company: await companyBranding(user.companyId),
     properties: await accessibleProperties(user),
   });
@@ -56,6 +72,8 @@ authRouter.get('/me', authRequired, async (req, res) => {
   res.json({
     user: { id: req.user.id, name: req.user.name, email: req.user.email, role: req.user.role, twoFactorEnabled: req.user.twoFactorEnabled, isSuperAdmin: req.user.isSuperAdmin },
     permissions: permissionsForRole(req.user.role),
+    services: SERVICES,
+    allowedServices: userServices(req.user),
     company: await companyBranding(req.user.companyId),
     properties: await accessibleProperties(req.user),
   });

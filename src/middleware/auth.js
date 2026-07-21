@@ -3,6 +3,7 @@
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import { prisma } from '../db.js';
+import { serviceForPermission, parseServiceList } from '../lib/services.js';
 
 // Jerarquía y permisos por rol (sección 4 del documento funcional)
 export const ROLES = ['OWNER', 'MANAGER', 'FRONTDESK', 'SALES', 'HOUSEKEEPING', 'MAINTENANCE', 'ACCOUNTING', 'HR', 'AUDITOR'];
@@ -83,11 +84,61 @@ export async function authRequired(req, res, next) {
   }
 }
 
+// Caché en memoria de servicios habilitados por sede (TTL corto). Evita un query
+// por request; se invalida al actualizar la configuración de una sede.
+const propertyServicesCache = new Map(); // propertyId -> { services: string[]|null, at: number }
+const PROP_CACHE_TTL = 30_000;
+
+export function invalidatePropertyServices(propertyId) {
+  if (propertyId) propertyServicesCache.delete(propertyId);
+  else propertyServicesCache.clear();
+}
+
+async function propertyEnabledServices(propertyId) {
+  const hit = propertyServicesCache.get(propertyId);
+  if (hit && Date.now() - hit.at < PROP_CACHE_TTL) return hit.services;
+  const prop = await prisma.property.findUnique({ where: { id: propertyId }, select: { enabledServices: true } }).catch(() => null);
+  const services = prop ? parseServiceList(prop.enabledServices) : null; // null = todos
+  propertyServicesCache.set(propertyId, { services, at: Date.now() });
+  return services;
+}
+
+// Resuelve el propertyId del request (query/body/params) para el gating por sede.
+function propertyIdFromReq(req) {
+  return req.query?.propertyId || req.body?.propertyId || req.params?.propertyId || null;
+}
+
+// El usuario tiene el servicio habilitado a nivel personal (allowedServices).
+// null = todas las áreas que su rol permite.
+export function userAllowsService(user, service) {
+  if (!service) return true;
+  const allowed = parseServiceList(user.allowedServices);
+  if (allowed == null) return true;
+  return allowed.includes(service);
+}
+
 export function requirePermission(perm) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'No autenticado' });
+    // El superadmin tiene acceso a todas las funciones (§55.1).
+    if (req.user.isSuperAdmin) return next();
     if (!hasPermission(req.user.role, perm)) {
       return res.status(403).json({ error: `Permiso denegado (${perm}) para rol ${req.user.role}` });
+    }
+    const service = serviceForPermission(perm);
+    if (service) {
+      // Gating por usuario: áreas asignadas por el superadmin.
+      if (!userAllowsService(req.user, service)) {
+        return res.status(403).json({ error: `Área no habilitada para tu usuario (${service})` });
+      }
+      // Gating por sede: el servicio debe estar contratado en la sede en contexto.
+      const propertyId = propertyIdFromReq(req);
+      if (propertyId && propertyScope(req, propertyId)) {
+        const enabled = await propertyEnabledServices(propertyId);
+        if (enabled != null && !enabled.includes(service)) {
+          return res.status(403).json({ error: `Servicio no habilitado en esta sede (${service})` });
+        }
+      }
     }
     next();
   };
