@@ -1,6 +1,17 @@
 // IA-1 · Contenido y conocimiento del hotel (§55.5). Centraliza el contenido
 // de habitaciones + la base de conocimiento que el agente consultará (IA-3/IA-5).
 import { prisma } from '../db.js';
+import { GUEST_SERVICES, parseServiceList } from '../lib/services.js';
+import { disabledFeatures } from './platform.js';
+
+// Servicios de cara al huésped que ofrece la sede (sin inventar): el mismo
+// subconjunto que se publica en el sitio, filtrado por lo habilitado (§14/§55.1).
+export async function hotelGuestServices(propertyId) {
+  const property = await prisma.property.findUnique({ where: { id: propertyId }, select: { enabledServices: true } });
+  const enabled = parseServiceList(property?.enabledServices); // null = todos
+  const disabled = await disabledFeatures();
+  return GUEST_SERVICES.filter(s => (enabled == null || enabled.includes(s.key)) && !disabled.has(s.key));
+}
 
 // Imágenes de un tipo de habitación: se guardan en el centro documental
 // (entityType='RoomType', docType='image') y se referencian por URL pública.
@@ -127,6 +138,7 @@ export async function knowledgeSnapshot(propertyId, { visibility = 'public' } = 
   // Carta del restaurante/room service: entrena al agente para responder platos,
   // precios y hacer upsell de consumos (§ restaurante/POS).
   const menu = await prisma.menuItem.findMany({ where: { propertyId, active: true }, orderBy: [{ category: 'asc' }, { price: 'asc' }], select: { name: true, category: true, price: true } });
+  const services = await hotelGuestServices(propertyId);
   return {
     hotel: {
       name: property?.name, city: property?.city, address: property?.address,
@@ -134,6 +146,7 @@ export async function knowledgeSnapshot(propertyId, { visibility = 'public' } = 
       currency: property?.currency,
     },
     rooms,
+    services, // servicios reales que ofrece el hotel (el agente no debe inventar otros)
     knowledge: items.map(i => ({ category: i.category, title: i.title, content: i.content, tags: i.tags, updatedAt: i.updatedAt })),
     policies: policies.map(p => ({ type: p.type, title: p.title, text: p.publicText || p.conditions })),
     menu: menu.map(m => ({ name: m.name, category: m.category, price: m.price })),

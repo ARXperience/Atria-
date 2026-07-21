@@ -1217,11 +1217,28 @@ async function main() {
       assert.match(reply, /agendar|coordinar/i, 'debe mencionar que puede agendar servicios');
     });
 
-    await test('el agente agenda una solicitud de servicio del cliente', async () => {
-      const sid = 'sched-test';
-      const { data } = await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: 'Quiero agendar transporte al aeropuerto para mi salida' } });
+    await test('el agente conoce los servicios reales del hotel (sin inventar)', async () => {
+      const sid = 'svc-info';
+      const { data } = await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: '¿Qué servicios ofrecen?' } });
       const reply = data.replies.join(' ');
-      assert.match(reply, /coordinad|solicitud|equipo/i, 'debe confirmar que dejó la solicitud coordinada');
+      assert.match(reply, /Alojamiento/i, 'debe listar los servicios reales de la sede');
+      assert.doesNotMatch(reply, /casino|discoteca|helipuerto/i, 'no debe inventar servicios');
+    });
+
+    await test('el agente agenda una solicitud y queda como tarjeta rastreable', async () => {
+      const sid = 'sched-test';
+      const marker = 'transporte al aeropuerto para mi salida';
+      const { data } = await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: `Quiero agendar ${marker}` } });
+      assert.match(data.replies.join(' '), /coordinad|registr|solicitud|equipo/i, 'confirma que dejó la solicitud');
+      // Aparece en el panel de Solicitudes con estado pendiente y canal webchat.
+      const list = await api(`/api/ops/guest-requests?propertyId=${propertyId}`);
+      const card = list.data.find(r => (r.detail || '').includes(marker) && r.status === 'pending');
+      assert.ok(card, 'la solicitud debe existir como tarjeta rastreable pendiente');
+      assert.equal(card.channel, 'webchat');
+      // Se puede marcar como hecha.
+      const done = await api(`/api/ops/guest-requests/${card.id}`, { method: 'PATCH', body: { status: 'done' } });
+      assert.equal(done.status, 200);
+      assert.equal(done.data.status, 'done');
     });
 
     await test('el agente responde datos de una habitación desde el contenido', async () => {

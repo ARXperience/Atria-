@@ -19,6 +19,7 @@ import { guestRecall, summarizeConversation, saveConversationSummary, updateGues
 import { fmtCOP, dayStr, parseDay, nightsBetween } from '../../lib/util.js';
 import { audit } from '../../lib/audit.js';
 import { notify } from '../notifications.js';
+import { emitEvent } from '../../lib/events.js';
 import { logger } from '../../lib/logger.js';
 
 const ESCALATION = /\b(queja|reclamo|reembolso|devoluci[oó]n|demanda|abogado|p[eé]simo|horrible|indignad|estafa|hablar con (un |una )?(humano|persona|asesor|agente|recepci[oó]n)|asesor humano)\b/i;
@@ -42,6 +43,7 @@ const CONFIRM = /\b(s[ií]|confirmo|confirmar|dale|listo|ok|okay|de acuerdo|acep
 const CANCEL_FLOW = /\b(cancelar|ya no|olv[ií]dalo|no gracias|d[eé]jalo as[ií])\b/i;
 const ASK_LOCATION = /\b(ubicaci[oó]n|direcci[oó]n|d[oó]nde (est[aá]n?|queda)|como llegar|cómo llegar)\b/i;
 const ASK_CHECKIN = /\b(hora.*(check.?in|entrada|llegada)|check.?in.*hora|a qu[eé] hora)\b/i;
+const ASK_SERVICES = /\b(qu[eé] servicios|servicios (tienen|ofrecen|hay|del hotel|incluye|disponibles)|con qu[eé] servicios|amenidades|instalaciones|qu[eé] ofrece el hotel|qu[eé] ofrecen)\b/i;
 const BOOKING_HINT = /\b(reserv|habitaci[oó]n|disponib|cotiz|precio|tarifa|cu[aá]nto (vale|cuesta)|hospeda|alojar|noche)/i;
 
 function pickOption(text, options) {
@@ -210,6 +212,18 @@ export async function assistantReply({ propertyId, conversation, text }) {
       return finish(replies, conversation, text, 'faq_checkin');
     }
 
+    // 8a-bis) Servicios del hotel: se listan SOLO los reales (sin inventar).
+    if (ASK_SERVICES.test(text)) {
+      const snap = await getSnapshot();
+      if (snap.services?.length) {
+        const list = snap.services.map(s => `• *${s.label}* — ${s.blurb}`).join('\n');
+        say(`En *${property.name}* ofrecemos:\n${list}\n\n¿Te ayudo a reservar o a agendar alguno de estos servicios? 😊`);
+      } else {
+        say(`Con gusto te comparto la información de *${property.name}*. ¿Qué servicio te interesa? También puedo comunicarte con una persona del equipo.`);
+      }
+      return finish(replies, conversation, text, 'services_info');
+    }
+
     // 8b) Respuesta con conocimiento del hotel (habitaciones, servicios, FAQs).
     // Solo para preguntas informativas, sin secuestrar el flujo de reserva.
     if (looksLikeQuestion(text)) {
@@ -226,11 +240,22 @@ export async function assistantReply({ propertyId, conversation, text }) {
       return finish(replies, conversation, text, 'capabilities');
     }
 
-    // 8c) Solicitud de servicio/agenda (no-alojamiento) → se coordina con el equipo.
+    // 8c) Solicitud de servicio/agenda (no-alojamiento): queda como tarjeta
+    // rastreable en el panel de Solicitudes (pendiente/hecho) + aviso al equipo.
     if (SERVICE_REQUEST.test(text)) {
-      await notify({ propertyId, audienceRole: 'FRONTDESK', severity: 'info', title: 'Solicitud vía asistente IA', body: text.slice(0, 400) });
-      await audit({ propertyId, actor: 'ai', action: 'ai.request_scheduled', entity: 'Conversation', entityId: conversation.id, after: { text: text.slice(0, 200) } });
-      say('¡Listo! 📝 Tomé tu solicitud y la dejé coordinada con nuestro equipo; te contactarán para confirmar los detalles. ¿Te ayudo con algo más — una reserva, precios o información del hotel?');
+      const t = text.toLowerCase();
+      const type = /toalla/.test(t) ? 'towels'
+        : /room ?service|servicio a la habitaci|almohada|amenit/.test(t) ? 'amenities'
+        : /(late ?check|check.?out tarde|early ?check|salida tarde)/.test(t) ? 'checkout'
+        : /(da[nñ]|reparar|no funciona|mantenimiento)/.test(t) ? 'maintenance'
+        : 'other';
+      const req = await prisma.guestRequest.create({
+        data: { propertyId, guestName: conversation.contactName || 'Cliente (chat web)', type, detail: text.slice(0, 500), channel: 'webchat', status: 'pending' },
+      });
+      await notify({ propertyId, audienceRole: 'FRONTDESK', severity: 'info', title: 'Solicitud vía asistente IA', body: text.slice(0, 400), entity: 'GuestRequest', entityId: req.id });
+      await audit({ propertyId, actor: 'ai', action: 'ai.request_scheduled', entity: 'GuestRequest', entityId: req.id, after: { text: text.slice(0, 200), type } });
+      emitEvent('guest_request.created', { propertyId, entityId: req.id, type, channel: 'webchat' });
+      say('¡Listo! 📝 Tomé tu solicitud, la registré y la dejé coordinada con nuestro equipo; te contactarán para confirmar los detalles. ¿Te ayudo con algo más — una reserva, precios o información del hotel?');
       return finish(replies, conversation, text, 'service_request');
     }
 

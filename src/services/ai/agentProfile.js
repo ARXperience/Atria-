@@ -82,6 +82,10 @@ export function buildSystemPrompt(profile, snapshot, { userRole = null } = {}) {
       lines.push(`- ${r.name} (${r.capacity} pax, desde ${Math.round(r.fromPrice)} COP/noche)${r.bedConfig ? `, ${r.bedConfig}` : ''}${r.view ? `, vista ${r.view}` : ''}${r.features ? `. Incluye: ${r.features}` : ''}. ${r.longDescription || r.description || ''}`.trim());
     }
   }
+  if (snapshot.services?.length) {
+    lines.push('\nSERVICIOS DEL HOTEL (estos son los ÚNICOS servicios que ofrece la sede; no menciones ni ofrezcas servicios que no estén en esta lista):');
+    for (const s of snapshot.services) lines.push(`- ${s.label}: ${s.blurb}`);
+  }
   if (snapshot.knowledge?.length) {
     lines.push('\nCONOCIMIENTO DEL HOTEL:');
     for (const k of snapshot.knowledge) lines.push(`- [${k.category}] ${k.title}: ${k.content}`);
