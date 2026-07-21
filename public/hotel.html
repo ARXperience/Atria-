@@ -132,8 +132,8 @@
       const chips = (cfg.suggestions||[]).map(s=>`<button class="ha-chip">${esc(s)}</button>`).join('');
       const d=document.createElement('div'); d.className='ha'; d.id='haDock';
       d.innerHTML=`
-        <div class="ha-coach" id="haCoach" ${cfg.proactive===false?'hidden':''}>
-          <p>${esc(cfg.welcome||'¿Necesitas ayuda? Pregúntame por habitaciones, precios y servicios. 😊')}</p>
+        <div class="ha-coach" id="haCoach" hidden>
+          <p id="haCoachP">${esc(cfg.welcome||'¿Necesitas ayuda? Pregúntame por habitaciones, precios y servicios. 😊')}</p>
           <div class="row"><button class="btn" id="haCoachOpen">Chatear ahora</button><button class="mini" id="haCoachX">Ahora no</button></div>
         </div>
         <div class="ha-panel" id="haPanel" hidden>
@@ -144,16 +144,47 @@
         </div>
         <button class="ha-fab" id="haFab" aria-label="Abrir asistente">💬</button>`;
       document.body.appendChild(d);
-      const panel=d.querySelector('#haPanel'), body=d.querySelector('#haBody'), coach=d.querySelector('#haCoach');
+      const panel=d.querySelector('#haPanel'), body=d.querySelector('#haBody'), coach=d.querySelector('#haCoach'), coachP=d.querySelector('#haCoachP');
       const add=(t,dir)=>{const el=document.createElement('div');el.className='ha-msg '+dir;el.textContent=t;body.appendChild(el);body.scrollTop=body.scrollHeight;};
-      const open=()=>{panel.hidden=false;coach.hidden=true;if(!ASST_SEEDED){ASST_SEEDED=true;add(`¡Hola! 👋 Bienvenido a ${name}. ¿En qué te ayudo? Puedo contarte de habitaciones, servicios y ayudarte a reservar.`,'in');}d.querySelector('#haText').focus();};
+      let chatOpened=false, coachShown=false, coachDismissed=false, currentKey=null; const fired=new Set(); let coachTimer;
+      const open=()=>{panel.hidden=false;coach.hidden=true;coachShown=false;chatOpened=true;if(!ASST_SEEDED){ASST_SEEDED=true;add(`¡Hola! 👋 Bienvenido a ${name}. ¿En qué te ayudo? Puedo contarte de habitaciones, servicios y ayudarte a reservar.`,'in');}d.querySelector('#haText').focus();};
       const close=()=>{panel.hidden=true;};
       d.querySelector('#haFab').onclick=()=>panel.hidden?open():close();
       d.querySelector('#haClose').onclick=close;
       d.querySelector('#haCoachOpen').onclick=open;
-      d.querySelector('#haCoachX').onclick=()=>{coach.hidden=true;};
-      if(cfg.proactive!==false) setTimeout(()=>{coach.hidden=true;},14000);
+      d.querySelector('#haCoachX').onclick=()=>{coach.hidden=true;coachShown=false;coachDismissed=true;};
       d.querySelectorAll('.ha-chip').forEach(ch=>{ch.onclick=()=>{ if(panel.hidden) open(); d.querySelector('#haText').value=ch.textContent; send(); };});
+      // ---- Saludo proactivo CONTEXTUAL (§14/§41): el mensaje se adapta a lo que
+      // hace el visitante. Una burbuja a la vez; cada disparador, una sola vez.
+      function showCoach(msg,key,{force=false}={}){
+        if(cfg.proactive===false||chatOpened) return;
+        if(document.querySelector('.modal-bg')) return; // no interrumpir una reserva en curso
+        if(key&&fired.has(key)) return;
+        if(coachDismissed&&!force) return;
+        // Un mensaje contextual puede reemplazar el saludo genérico; entre sí no.
+        const canReplaceGeneric = coachShown && currentKey==='welcome' && key!=='welcome';
+        if(coachShown&&!force&&!canReplaceGeneric) return;
+        fired.add(key); currentKey=key; coachP.textContent=msg; coach.hidden=false; coachShown=true;
+        clearTimeout(coachTimer); coachTimer=setTimeout(()=>{coach.hidden=true;coachShown=false;currentKey=null;},15000);
+      }
+      window._haCtx={showCoach};
+      if(cfg.proactive!==false){
+        const params=new URLSearchParams(location.search);
+        const promo=params.get('promo')||params.get('coupon')||params.get('utm_campaign')||params.get('utm_source');
+        const returning=localStorage.getItem('atria_seen_'+pid);
+        localStorage.setItem('atria_seen_'+pid,'1');
+        if(promo) setTimeout(()=>showCoach('🎉 ¡Tienes una promoción esperándote! ¿Te ayudo a reservar con el mejor precio directo?','promo'),1600);
+        else if(returning) setTimeout(()=>showCoach(`¡Qué bueno verte de nuevo en ${name}! ¿Retomamos tu reserva? 😊`,'welcome'),3500);
+        else setTimeout(()=>showCoach(cfg.welcome||'¿Necesitas ayuda? Pregúntame por habitaciones, precios y servicios. 😊','welcome'),4500);
+        // Se detiene en las habitaciones → ofrece ayuda para elegir.
+        const roomsSec=document.querySelector('.rooms');
+        if(roomsSec&&'IntersectionObserver' in window){
+          let dwell; const io=new IntersectionObserver(es=>es.forEach(en=>{ if(en.isIntersecting) dwell=setTimeout(()=>showCoach('¿Te ayudo a elegir la habitación ideal para tu estadía? 🛏️','rooms'),6000); else clearTimeout(dwell); }),{threshold:.4});
+          io.observe(roomsSec);
+        }
+        // Intención de salida → último empujón con valor.
+        document.addEventListener('mouseout',e=>{ if(e.clientY<=0&&!e.relatedTarget) showCoach('¿Antes de irte? Reserva directa = mejor precio, sin comisiones. ¿Te ayudo? 👋','exit',{force:true}); });
+      }
       const send=async()=>{
         const inp=d.querySelector('#haText'); const text=inp.value.trim(); if(!text) return; inp.value='';
         add(text,'out');
@@ -193,6 +224,8 @@
         <div class="body"><h3>${esc(o.roomType)}</h3><div class="muted" style="font-size:13px">${o.available} disponible(s) · hasta ${o.capacity} personas</div>
         <div class="avail"><div class="price">${cop(o.price)} <small>/noche</small></div><button class="btn" onclick="book(${i})">Reservar</button></div></div></div>`).join('')}</div>`;
       box.scrollIntoView({behavior:'smooth'});
+      // Buscó fechas pero no ha reservado → empujón contextual con las fechas.
+      if(window._haCtx) setTimeout(()=>window._haCtx.showCoach(`¿Te reservo del ${ci} al ${co}? Te guío en un minuto. 😊`,'avail'),10000);
     };
 
     window.book = (i) => {
