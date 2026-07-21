@@ -167,6 +167,19 @@ model Session {
   @@index([userId, revokedAt])
 }
 
+// Interruptores globales de funciones del sistema (§55.1). El superadministrador
+// activa/desactiva un servicio o módulo para TODA la plataforma. Ausente = activo.
+// Es el nivel más alto: si aquí está apagado, nadie (salvo el superadmin) lo usa,
+// por encima de lo que habilite cada sede o usuario.
+model PlatformFeature {
+  id        String   @id @default(cuid())
+  key       String   @unique // clave de servicio (SERVICE_KEYS) o "module:<id>"
+  enabled   Boolean  @default(true)
+  note      String?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
 // Parámetros legales versionados por vigencia (sección 3 y 6 del documento funcional)
 model LegalParameter {
   id         String    @id @default(cuid())

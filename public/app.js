@@ -7,6 +7,7 @@
     permissions: JSON.parse(localStorage.getItem('atria_perms') || '[]'),
     services: JSON.parse(localStorage.getItem('atria_services') || '[]'),
     allowedServices: JSON.parse(localStorage.getItem('atria_allowed') || 'null'),
+    disabledFeatures: JSON.parse(localStorage.getItem('atria_disabled') || '[]'),
     company: JSON.parse(localStorage.getItem('atria_company') || 'null'),
     properties: JSON.parse(localStorage.getItem('atria_props') || '[]'),
     propertyId: localStorage.getItem('atria_prop') || null,
@@ -24,6 +25,17 @@
     }
   }
   applyBranding(state.company);
+
+  // Tema claro/oscuro (§55.1). Preferencia por usuario; por defecto oscuro.
+  function currentTheme() { return localStorage.getItem('atria_theme') || 'dark'; }
+  function applyTheme(theme) {
+    const t = theme || currentTheme();
+    if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    else document.documentElement.removeAttribute('data-theme');
+    localStorage.setItem('atria_theme', t);
+  }
+  function toggleTheme() { applyTheme(currentTheme() === 'light' ? 'dark' : 'light'); render(); }
+  applyTheme();
 
   // ---------- utilidades ----------
   const $ = sel => document.querySelector(sel);
@@ -138,6 +150,7 @@
 
   // ---------- login ----------
   function renderLogin() {
+    document.getElementById('asstDock')?.remove(); // sin asistente en la pantalla de acceso
     root.innerHTML = `
       <div class="login-wrap"><div class="login-card">
         <div class="brand">ATR<b>IA</b></div>
@@ -161,12 +174,14 @@
         state.permissions = data.permissions || [];
         state.services = data.services || [];
         state.allowedServices = data.allowedServices || null;
+        state.disabledFeatures = data.disabledFeatures || [];
         state.propertyId = data.properties[0]?.id || null;
         localStorage.setItem('atria_token', data.token);
         localStorage.setItem('atria_user', JSON.stringify(data.user));
         localStorage.setItem('atria_perms', JSON.stringify(state.permissions));
         localStorage.setItem('atria_services', JSON.stringify(state.services));
         localStorage.setItem('atria_allowed', JSON.stringify(state.allowedServices));
+        localStorage.setItem('atria_disabled', JSON.stringify(state.disabledFeatures));
         localStorage.setItem('atria_company', JSON.stringify(data.company || null));
         localStorage.setItem('atria_props', JSON.stringify(data.properties));
         localStorage.setItem('atria_prop', state.propertyId || '');
@@ -212,6 +227,8 @@
     if (CORE_DOMAINS.has(domain)) return true;
     const service = domainService(domain);
     if (!service) return true; // dominio no mapeado a un servicio: no se restringe
+    // A nivel global (el superadmin apagó la función para toda la plataforma).
+    if ((state.disabledFeatures || []).includes(service)) return false;
     // A nivel usuario (áreas asignadas por el superadmin).
     if (Array.isArray(state.allowedServices) && !state.allowedServices.includes(service)) return false;
     // A nivel sede (servicios contratados en la sede activa).
@@ -311,6 +328,143 @@
     ['settings', '⚙️ Configuración'],
   ];
 
+  // ============================================================
+  // Asistente IA siempre disponible (§41 / §55.6)
+  // Un chat flotante presente en TODA la app y para todo usuario. Además, una
+  // guía contextual que orienta al entrar a cada apartado; la guía automática se
+  // puede desactivar, pero el chat siempre queda visible y funcional.
+  // ============================================================
+  const GUIDE = {
+    dashboard: 'Este es el pulso del hotel: ocupación, ingresos y pendientes del día. Pregúntame "¿cómo vamos hoy?".',
+    portfolio: 'Vista de portafolio multi-sede. Compara desempeño entre hoteles; pregúntame por cualquiera.',
+    reservations: 'Gestiona reservas: crea, modifica y haz check-in/out. Dime "llegadas de hoy" o pídeme crear una.',
+    booking: 'Motor de reservas: busco disponibilidad y creo la reserva. Puedo cotizar por fechas y huéspedes.',
+    rooms: 'Estado de habitaciones en tiempo real. Pregúntame "qué habitaciones están libres".',
+    housekeeping: 'Limpiezas y su prioridad. Puedo listar pendientes o auto-asignar de forma balanceada.',
+    maintenance: 'Órdenes de mantenimiento. Dime "órdenes abiertas" o pídeme crear una nueva.',
+    guestrequests: 'Solicitudes de huéspedes. Te ayudo a priorizarlas y darles seguimiento.',
+    inbox: 'Conversaciones y WhatsApp. Te ayudo a redactar respuestas y a resumir hilos.',
+    crm: 'Clientes, leads y segmentos. Puedo recalcular leads o proponer una campaña de recuperación.',
+    corporate: 'Cuentas corporativas y grupos. Gestiono tarifas y roomings.',
+    marketing: 'Campañas y cupones. Puedo sugerir una campaña dirigida a un segmento.',
+    reputation: 'Reseñas y sentimiento por tema. Dime "qué temas están empeorando".',
+    events: 'Eventos y salones: cotiza, agenda y coordina.',
+    payments: 'Pagos y links de cobro. Puedo generar un link para una reserva.',
+    invoices: 'Facturación electrónica (Dataico/DIAN).',
+    finance: 'Caja, conciliación y cuentas por pagar. Pregúntame "caja del día".',
+    revenue: 'Revenue: pace de reservas, ocupación y tarifas sugeridas.',
+    channels: 'Canales de venta y sincronización de disponibilidad.',
+    inventory: 'Inventario e insumos. Te aviso de stock bajo.',
+    pos: 'Punto de venta del restaurante.',
+    employees: 'Empleados y contratos.',
+    shifts: 'Turnos y programación del personal.',
+    payroll: 'Nómina y liquidaciones (con parámetros legales vigentes).',
+    sgsst: 'SG-SST: seguridad y salud en el trabajo.',
+    approvals: 'Aprobaciones pendientes: revisa el impacto y decide.',
+    compliance: 'Cumplimiento hotelero (TRA, SIRE, RNT).',
+    dataprotection: 'Protección de datos (habeas data): consentimientos y solicitudes.',
+    fontur: 'FONTUR y contribución parafiscal.',
+    documents: 'Plantillas y políticas documentales.',
+    audit: 'Auditoría: cada acción queda registrada (humano/IA/sistema).',
+    content: 'Habitaciones y base de conocimiento del agente IA.',
+    site: 'Sitio web público del hotel.',
+    agent: 'Configura y prueba el agente IA que atiende a tus huéspedes.',
+    subscription: 'Tu plan y consumo del software.',
+    saasadmin: 'Consola del superadmin: planes, funciones del sistema y accesos por sede y por usuario.',
+    settings: 'Configuración: usuarios, parámetros legales, seguridad, marca y tema.',
+    copilot: 'Soy tu copiloto. Pregúntame lo que necesites en lenguaje natural; solo veo lo que tu rol permite.',
+  };
+  const guideEnabled = () => localStorage.getItem('atria_guide') !== 'off';
+  const ASSIST = { lastCoach: null };
+
+  // Lógica de chat compartida (texto + vista previa de acciones sensibles).
+  async function assistantAsk(body, text) {
+    if (!text || !text.trim()) return;
+    const append = (t, dir) => { const el = document.createElement('div'); el.className = 'msg ' + dir; el.textContent = t; body.appendChild(el); body.scrollTop = body.scrollHeight; return el; };
+    const typing = on => { let t = body.querySelector('.typing'); if (on && !t) { t = document.createElement('div'); t.className = 'typing'; t.innerHTML = '<span></span><span></span><span></span>'; body.appendChild(t); body.scrollTop = body.scrollHeight; } if (!on && t) t.remove(); };
+    append(text, 'out'); typing(true);
+    if (!state.propertyId) { typing(false); append('Selecciona una sede para poder ayudarte con sus datos.', 'in'); return; }
+    try {
+      const { data } = await api('/assistant/internal', { method: 'POST', body: { propertyId: state.propertyId, text } });
+      typing(false);
+      if (data.kind === 'action') {
+        const { action, preview } = data;
+        const rows = preview.impact.map(i => `<tr><td class="muted" style="padding:2px 10px 2px 0">${esc(i.label)}</td><td>${esc(String(i.before))}</td><td style="color:var(--accent)">→ ${esc(String(i.after))}</td></tr>`).join('');
+        const el = document.createElement('div'); el.className = 'msg in';
+        el.innerHTML = `<div style="font-weight:600;margin-bottom:6px">🤖 ${esc(preview.title)}</div><table style="font-size:12.5px;margin-bottom:8px">${rows}</table><div class="muted" style="font-size:11.5px;margin-bottom:8px">${esc(preview.note)}</div><div class="row" style="gap:8px"><button class="btn small fit" data-run>${preview.requiresApproval ? 'Enviar a aprobación' : 'Ejecutar'}</button><button class="btn small secondary fit" data-cancel>Cancelar</button></div>`;
+        body.appendChild(el); body.scrollTop = body.scrollHeight;
+        el.querySelector('[data-cancel]').onclick = () => { el.querySelector('.row').innerHTML = '<span class="muted" style="font-size:12px">Acción descartada.</span>'; };
+        el.querySelector('[data-run]').onclick = async (ev) => {
+          ev.target.disabled = true;
+          try { const { data: r } = await api('/assistant/action/execute', { method: 'POST', body: { propertyId: state.propertyId, action } });
+            el.querySelector('.row').innerHTML = `<span style="color:var(--green);font-size:12.5px">${r.executed ? '✅ Acción ejecutada.' : '⏳ Enviada a aprobación.'}</span>`;
+          } catch (err) { ev.target.disabled = false; toast(err.message, true); }
+        };
+        return;
+      }
+      append(data.reply, 'in');
+    } catch (err) { typing(false); append('No pude procesar eso: ' + err.message, 'in'); }
+  }
+
+  // Monta (una vez) el dock flotante; persiste aunque se re-renderice el shell.
+  function mountAssistant() {
+    if (document.getElementById('asstDock')) { syncGuideToggle(); return; }
+    const dock = document.createElement('div');
+    dock.id = 'asstDock'; dock.className = 'asst';
+    dock.innerHTML = `
+      <div class="asst-coach" id="asstCoach" hidden></div>
+      <div class="asst-panel" id="asstPanel" hidden>
+        <div class="asst-head">
+          <div><b>Asistente IA</b><div class="muted" style="font-size:11px">Pregúntame en lenguaje natural</div></div>
+          <button class="asst-x" id="asstClose" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="asst-body" id="asstBody"></div>
+        <div class="asst-input">
+          <input id="asstText" placeholder="Escribe tu pregunta…" autocomplete="off">
+          <button class="btn small" id="asstSend">Enviar</button>
+        </div>
+        <label class="asst-guide"><input type="checkbox" id="asstGuideChk"> Guía automática al entrar a cada sección</label>
+      </div>
+      <button class="asst-fab" id="asstFab" aria-label="Abrir asistente" title="Asistente IA">💬</button>`;
+    document.body.appendChild(dock);
+
+    const panel = dock.querySelector('#asstPanel');
+    const bodyEl = dock.querySelector('#asstBody');
+    const fab = dock.querySelector('#asstFab');
+    const openPanel = (seed) => {
+      panel.hidden = false; fab.classList.add('on'); hideCoach();
+      if (!bodyEl.dataset.greeted) { bodyEl.dataset.greeted = '1'; const g = document.createElement('div'); g.className = 'msg in'; g.textContent = `¡Hola, ${state.user?.name?.split(' ')[0] || ''}! 👋 Soy tu asistente. ¿En qué te ayudo?`; bodyEl.appendChild(g); }
+      if (seed) { const el = document.createElement('div'); el.className = 'msg in'; el.textContent = seed; bodyEl.appendChild(el); bodyEl.scrollTop = bodyEl.scrollHeight; }
+      dock.querySelector('#asstText').focus();
+    };
+    const closePanel = () => { panel.hidden = true; fab.classList.remove('on'); };
+    window._asstOpen = openPanel; window._asstClose = closePanel;
+    fab.onclick = () => panel.hidden ? openPanel() : closePanel();
+    dock.querySelector('#asstClose').onclick = closePanel;
+    const send = () => { const inp = dock.querySelector('#asstText'); const v = inp.value; inp.value = ''; assistantAsk(bodyEl, v); };
+    dock.querySelector('#asstSend').onclick = send;
+    dock.querySelector('#asstText').onkeydown = e => { if (e.key === 'Enter') send(); };
+    const chk = dock.querySelector('#asstGuideChk');
+    chk.onchange = () => { localStorage.setItem('atria_guide', chk.checked ? 'on' : 'off'); if (!chk.checked) hideCoach(); toast(chk.checked ? 'Guía automática activada' : 'Guía automática desactivada (el chat sigue disponible)'); };
+    syncGuideToggle();
+  }
+  function syncGuideToggle() { const chk = document.getElementById('asstGuideChk'); if (chk) chk.checked = guideEnabled(); }
+  function hideCoach() { const c = document.getElementById('asstCoach'); if (c) c.hidden = true; }
+  // Burbuja de guía contextual al entrar a una sección (si la guía está activa).
+  function maybeCoach(view) {
+    if (view === ASSIST.lastCoach) return; // solo al cambiar de sección
+    ASSIST.lastCoach = view;
+    const c = document.getElementById('asstCoach');
+    if (!c) return;
+    const tip = GUIDE[view];
+    if (!guideEnabled() || !tip) { c.hidden = true; return; }
+    c.innerHTML = `<div class="asst-coach-txt">${esc(tip)}</div><div class="asst-coach-actions"><button class="btn small" id="coachAsk">Abrir asistente</button><button class="asst-coach-x" id="coachX" aria-label="Cerrar guía">✕</button></div>`;
+    c.hidden = false;
+    c.querySelector('#coachAsk').onclick = () => window._asstOpen && window._asstOpen();
+    c.querySelector('#coachX').onclick = hideCoach;
+    clearTimeout(ASSIST._timer); ASSIST._timer = setTimeout(() => { if (c) c.hidden = true; }, 12000);
+  }
+
   function renderShell(contentHtml, title) {
     root.innerHTML = `
       <div class="app" id="appShell">
@@ -335,10 +489,11 @@
         <div class="main">
           <div class="topbar">
             <h1>${esc(title)}</h1>
-            <div class="row fit" style="align-items:center">
+            <div class="row fit" style="align-items:center;gap:8px">
               <select id="propSel" class="fit" style="width:auto">
                 ${state.properties.map(p => `<option value="${p.id}" ${p.id === state.propertyId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
               </select>
+              <button id="themeBtn" class="icon-btn" title="Cambiar tema claro/oscuro" aria-label="Cambiar tema">${currentTheme() === 'light' ? '🌙' : '☀️'}</button>
             </div>
           </div>
           <div id="content">${contentHtml}</div>
@@ -346,12 +501,16 @@
       </div>`;
     $('#logoutLink').onclick = e => { e.preventDefault(); logout(); };
     $('#propSel').onchange = e => { state.propertyId = e.target.value; localStorage.setItem('atria_prop', state.propertyId); render(); };
+    const themeBtn = $('#themeBtn'); if (themeBtn) themeBtn.onclick = toggleTheme;
     // Drawer móvil: abrir/cerrar el menú lateral
     const shell = $('#appShell');
     const closeNav = () => shell.classList.remove('nav-open');
     $('#menuBtn').onclick = () => shell.classList.toggle('nav-open');
     $('#navScrim').onclick = closeNav;
     shell.querySelectorAll('.nav a').forEach(a => a.addEventListener('click', closeNav));
+    // Asistente IA siempre disponible + guía contextual del apartado actual.
+    mountAssistant();
+    maybeCoach(state.view);
   }
 
   function modal(html) {
@@ -3308,8 +3467,19 @@
   }
 
   async function viewSaasAdmin() {
-    const [companies, plans, billing, svcCat] = await Promise.all([get('/saas/companies'), get('/saas/plans'), get('/saas/billing').catch(() => null), get('/saas/services').catch(() => ({ services: [] }))]);
+    const [companies, plans, billing, svcCat, feat] = await Promise.all([get('/saas/companies'), get('/saas/plans'), get('/saas/billing').catch(() => null), get('/saas/services').catch(() => ({ services: [] })), get('/saas/features').catch(() => ({ features: [] }))]);
     const SVC = svcCat.services || [];
+    const svcLabel = Object.fromEntries(SVC.map(s => [s.key, s.label]));
+    // Interruptores globales: activar/desactivar una función para toda la plataforma.
+    window._saasFeature = async (key, enabled) => {
+      try {
+        await api(`/saas/features/${key}`, { method: 'POST', body: { enabled } });
+        toast(enabled ? 'Función activada para toda la plataforma' : 'Función desactivada para toda la plataforma');
+        // Refresca los flags locales para que la navegación reaccione al instante.
+        try { const me = await get('/auth/me'); state.disabledFeatures = me.disabledFeatures || []; localStorage.setItem('atria_disabled', JSON.stringify(state.disabledFeatures)); } catch { /* noop */ }
+        render();
+      } catch (e) { toast(e.message, true); }
+    };
     const stLabel = { trial: 'Prueba', active: 'Activa', suspended: 'Suspendida', cancelled: 'Cancelada' };
     const stColor = { trial: 'yellow', active: 'green', suspended: 'red', cancelled: 'gray' };
     const invColor = { pending: 'yellow', paid: 'green', overdue: 'red', void: 'gray' };
@@ -3378,6 +3548,16 @@
         <div class="kpi"><div class="label">Activas</div><div class="value" style="color:var(--green)">${active}</div></div>
         <div class="kpi"><div class="label">Suspendidas</div><div class="value" style="color:${companies.some(c => c.subStatus === 'suspended') ? 'var(--red)' : 'inherit'}">${companies.filter(c => c.subStatus === 'suspended').length}</div></div>
         <div class="kpi"><div class="label">MRR estimado</div><div class="value" style="color:var(--accent)">${cop(mrr)}</div></div>
+      </div>
+      <div class="card mt"><h3>Funciones del sistema</h3>
+        <p class="muted" style="font-size:12.5px;margin-bottom:12px">Control total: activa o desactiva cada función para <b>toda la plataforma</b>. Si la apagas, ninguna empresa la verá (tú, como superadmin, siempre conservas el acceso).</p>
+        <div class="chkgrid">
+          ${(feat.features || []).map(f => `
+            <label class="switch-row">
+              <span>${esc(svcLabel[f.key] || f.key)}</span>
+              <input type="checkbox" ${f.enabled ? 'checked' : ''} onchange="_saasFeature('${f.key}', this.checked)">
+            </label>`).join('')}
+        </div>
       </div>
       <div class="card mt"><h3>Empresas del SaaS</h3>
         <table><tr><th>Empresa</th><th>NIT</th><th>Plan</th><th>Estado</th><th>Usuarios</th><th>Sedes</th><th>Acciones</th></tr>
@@ -3644,12 +3824,14 @@
       const data = await get('/auth/me');
       state.user = data.user; state.permissions = data.permissions || [];
       state.services = data.services || state.services; state.allowedServices = data.allowedServices ?? null;
+      state.disabledFeatures = data.disabledFeatures || [];
       state.properties = data.properties || state.properties; state.company = data.company || state.company;
       if (!state.properties.find(p => p.id === state.propertyId)) state.propertyId = state.properties[0]?.id || null;
       localStorage.setItem('atria_user', JSON.stringify(state.user));
       localStorage.setItem('atria_perms', JSON.stringify(state.permissions));
       localStorage.setItem('atria_services', JSON.stringify(state.services));
       localStorage.setItem('atria_allowed', JSON.stringify(state.allowedServices));
+      localStorage.setItem('atria_disabled', JSON.stringify(state.disabledFeatures));
       localStorage.setItem('atria_props', JSON.stringify(state.properties));
       localStorage.setItem('atria_prop', state.propertyId || '');
       applyBranding(state.company);

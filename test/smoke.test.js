@@ -2694,6 +2694,36 @@ async function main() {
       assert.equal(login2.data.allowedServices.length > 1, true, 'restaurado a todas las áreas del rol');
     });
 
+    await test('el superadmin apaga una funcion para toda la plataforma y la reactiva', async () => {
+      const { data: sa } = await api('/api/auth/login', { method: 'POST', body: { email: 'superadmin@atria.co', password: 'atria2026' } });
+      const SH = { 'content-type': 'application/json', authorization: `Bearer ${sa.token}` };
+      // Estado inicial: eventos habilitado.
+      const feats = await (await fetch(`${BASE}/api/saas/features`, { headers: SH })).json();
+      assert.ok(feats.features.find(f => f.key === 'events'), 'catálogo de features');
+      // Apagar "events" globalmente.
+      const off = await fetch(`${BASE}/api/saas/features/events`, { method: 'POST', headers: SH, body: JSON.stringify({ enabled: false }) });
+      assert.equal(off.status, 200);
+      // El gerente (events.*) queda bloqueado.
+      const blocked = await fetch(`${BASE}/api/events?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${token}` } });
+      assert.equal(blocked.status, 403, 'función deshabilitada en la plataforma');
+      // El login del gerente refleja la función deshabilitada.
+      const relog = await api('/api/auth/login', { method: 'POST', body: { email: 'gerente@atria.co', password: 'atria2026' } });
+      assert.ok((relog.data.disabledFeatures || []).includes('events'));
+      // El superadmin nunca queda bloqueado.
+      const saOk = await fetch(`${BASE}/api/events?propertyId=${propertyId}`, { headers: SH });
+      assert.equal(saOk.status, 200, 'el superadmin conserva el acceso');
+      // Reactivar.
+      const on = await fetch(`${BASE}/api/saas/features/events`, { method: 'POST', headers: SH, body: JSON.stringify({ enabled: true }) });
+      assert.equal(on.status, 200);
+      const after = await fetch(`${BASE}/api/events?propertyId=${propertyId}`, { headers: { authorization: `Bearer ${token}` } });
+      assert.equal(after.status, 200, 'tras reactivar, la función vuelve');
+    });
+
+    await test('un usuario normal no puede togglear funciones del sistema', async () => {
+      const res = await fetch(`${BASE}/api/saas/features/events`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ enabled: false }) });
+      assert.equal(res.status, 403);
+    });
+
     // ===== White-label (§55.1) =====
     await test('el administrador configura la marca y el login la devuelve', async () => {
       const r = await api('/api/saas/branding', { method: 'POST', body: { commercialName: 'Grupo Hotelero Andes', brandColor: '#3b82f6' } });

@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import { prisma } from '../db.js';
 import { serviceForPermission, parseServiceList } from '../lib/services.js';
+import { disabledFeatures } from '../services/platform.js';
 
 // Jerarquía y permisos por rol (sección 4 del documento funcional)
 export const ROLES = ['OWNER', 'MANAGER', 'FRONTDESK', 'SALES', 'HOUSEKEEPING', 'MAINTENANCE', 'ACCOUNTING', 'HR', 'AUDITOR'];
@@ -127,6 +128,11 @@ export function requirePermission(perm) {
     }
     const service = serviceForPermission(perm);
     if (service) {
+      // Gating global: el superadmin puede apagar un servicio para toda la plataforma.
+      const disabled = await disabledFeatures();
+      if (disabled.has(service)) {
+        return res.status(403).json({ error: `Función deshabilitada en la plataforma (${service})` });
+      }
       // Gating por usuario: áreas asignadas por el superadmin.
       if (!userAllowsService(req.user, service)) {
         return res.status(403).json({ error: `Área no habilitada para tu usuario (${service})` });

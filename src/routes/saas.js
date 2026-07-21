@@ -11,6 +11,7 @@ import {
 } from '../services/saasBilling.js';
 import { SERVICES, SERVICE_KEYS, serializeServiceList, parseServiceList } from '../lib/services.js';
 import { invalidatePropertyServices } from '../middleware/auth.js';
+import { featureStates, setFeature } from '../services/platform.js';
 import { audit } from '../lib/audit.js';
 
 export const saasRouter = Router();
@@ -58,6 +59,15 @@ saasRouter.post('/companies/:id/status', requireSuperAdmin, async (req, res) => 
 
 // Catálogo de servicios disponibles (para armar la consola del superadmin).
 saasRouter.get('/services', requireSuperAdmin, async (_req, res) => res.json({ services: SERVICES }));
+
+// Interruptores globales del sistema: estado por servicio (§55.1).
+saasRouter.get('/features', requireSuperAdmin, async (_req, res) => res.json({ services: SERVICES, features: await featureStates() }));
+
+// Activar/desactivar un servicio para toda la plataforma.
+saasRouter.post('/features/:key', requireSuperAdmin, async (req, res) => {
+  try { res.json(await setFeature(req.params.key, req.body?.enabled !== false, { user: req.user, note: req.body?.note })); }
+  catch (err) { badRequest(res, err.message); }
+});
 
 // Sedes de una empresa con sus servicios habilitados (null => todos).
 saasRouter.get('/companies/:id/properties', requireSuperAdmin, async (req, res) => {

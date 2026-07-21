@@ -66,6 +66,55 @@
   --step-3: 26px;
 }
 
+/* ============================================================
+   Tema claro (§55.1) — misma identidad (oro Atria), superficies claras.
+   Se activa con data-theme="light" en <html>; el usuario alterna desde la barra.
+   ============================================================ */
+:root[data-theme="light"] {
+  --bg: #f5f3ee;
+  --bg-elev: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f2efe8;
+  --surface-3: #e7e2d7;
+  --border: #e0dacd;
+  --border-soft: #ebe6db;
+
+  --text: #23262b;
+  --text-dim: #4c525b;
+  --muted: #79828e;
+
+  --accent: #a8813a;
+  --accent-hi: #b7924a;
+  --accent-lo: #8f6d31;
+  --accent-soft: rgba(168, 129, 58, .12);
+  --accent-ring: rgba(168, 129, 58, .34);
+
+  --green: #1f9d63;      --green-soft: rgba(31, 157, 99, .12);
+  --red: #cf4650;        --red-soft: rgba(207, 70, 80, .12);
+  --yellow: #b0821a;     --yellow-soft: rgba(176, 130, 26, .14);
+  --blue: #2f6fb0;       --blue-soft: rgba(47, 111, 176, .12);
+  --gray-soft: rgba(120, 130, 145, .14);
+
+  --shadow-sm: 0 1px 2px rgba(30,30,40,.06);
+  --shadow-md: 0 4px 16px rgba(30,30,40,.09);
+  --shadow-lg: 0 18px 48px rgba(30,30,40,.16);
+  --glow: 0 0 0 1px rgba(168,129,58,.16), 0 10px 30px rgba(168,129,58,.08);
+}
+:root[data-theme="light"] body {
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(168,129,58,.07), transparent 60%),
+    radial-gradient(900px 500px at -10% 10%, rgba(47,111,176,.05), transparent 55%),
+    var(--bg);
+}
+/* Superficies con degradado fijo: reajustadas para claro. */
+:root[data-theme="light"] .login-wrap {
+  background:
+    radial-gradient(1000px 500px at 50% -20%, rgba(168,129,58,.14), transparent 60%),
+    linear-gradient(180deg, #ffffff 0%, var(--bg) 70%);
+}
+:root[data-theme="light"] .login-card { background: linear-gradient(180deg, #ffffff 0%, var(--surface-2) 100%); }
+:root[data-theme="light"] .sidebar { background: linear-gradient(180deg, #ffffff 0%, var(--surface-2) 100%); }
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html { scroll-behavior: smooth; }
@@ -482,3 +531,38 @@ code { background: var(--bg-elev); padding: 1px 6px; border-radius: 5px; font-si
 .chkgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px 14px; }
 label.chk { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; white-space: normal; }
 label.chk input { width: auto; margin: 0; flex: 0 0 auto; }
+
+/* Interruptores de funciones del sistema (§55.1). */
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: var(--r-sm); font-size: 13px; cursor: pointer; }
+.switch-row input { width: auto; margin: 0; flex: 0 0 auto; transform: scale(1.15); accent-color: var(--accent); }
+
+/* Botón de icono (barra superior): tema, etc. */
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border: 1px solid var(--border); background: var(--surface-2); border-radius: var(--r-sm); font-size: 17px; cursor: pointer; line-height: 1; transition: background var(--dur-1) var(--ease), transform var(--dur-1) var(--ease); }
+.icon-btn:hover { background: var(--surface-3); transform: translateY(-1px); }
+
+/* ============================================================
+   Asistente IA flotante — siempre disponible (§41/§55.6)
+   ============================================================ */
+.asst { position: fixed; right: 22px; bottom: 22px; z-index: 900; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+.asst [hidden] { display: none !important; }
+.asst-fab { width: 58px; height: 58px; border-radius: 50%; border: none; cursor: pointer; font-size: 25px; line-height: 1; color: #1a1205; background: var(--accent-grad, var(--accent)); box-shadow: var(--shadow-lg); transition: transform var(--dur-1) var(--ease); }
+.asst-fab:hover { transform: translateY(-2px) scale(1.05); }
+.asst-fab.on { transform: rotate(8deg); }
+.asst-panel { width: 380px; max-width: calc(100vw - 44px); height: 520px; max-height: calc(100vh - 120px); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; overflow: hidden; animation: scaleIn var(--dur-2) var(--ease-out) both; }
+.asst-head { display: flex; align-items: center; justify-content: space-between; padding: 13px 15px; border-bottom: 1px solid var(--border-soft); background: linear-gradient(180deg, var(--surface-2), var(--surface)); }
+.asst-x { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; padding: 4px 6px; border-radius: 6px; }
+.asst-x:hover { background: var(--surface-3); color: var(--text); }
+.asst-body { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 9px; }
+.asst-input { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border-soft); }
+.asst-input input { flex: 1; min-width: 0; }
+.asst-guide { display: flex; align-items: center; gap: 8px; padding: 0 12px 11px; font-size: 11.5px; color: var(--muted); cursor: pointer; }
+.asst-guide input { width: auto; margin: 0; accent-color: var(--accent); }
+.asst-coach { max-width: 300px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 12px 13px; animation: slideInRight var(--dur-3) var(--ease-out) both; }
+.asst-coach-txt { font-size: 12.8px; line-height: 1.5; color: var(--text-dim); margin-bottom: 9px; }
+.asst-coach-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.asst-coach-x { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 6px; }
+.asst-coach-x:hover { color: var(--text); }
+@media (max-width: 640px) {
+  .asst { right: 14px; bottom: 14px; }
+  .asst-panel { width: calc(100vw - 28px); height: 70vh; }
+}

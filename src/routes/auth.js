@@ -9,6 +9,7 @@ import { badRequest } from '../lib/util.js';
 import { validatePassword } from '../lib/password.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../lib/totp.js';
 import { SERVICES, SERVICE_KEYS, parseServiceList } from '../lib/services.js';
+import { disabledFeatures } from '../services/platform.js';
 
 export const authRouter = Router();
 
@@ -63,6 +64,7 @@ authRouter.post('/login', async (req, res) => {
     permissions: permissionsForRole(user.role),
     services: SERVICES,
     allowedServices: userServices(user),
+    disabledFeatures: [...await disabledFeatures()],
     company: await companyBranding(user.companyId),
     properties: await accessibleProperties(user),
   });
@@ -74,6 +76,7 @@ authRouter.get('/me', authRequired, async (req, res) => {
     permissions: permissionsForRole(req.user.role),
     services: SERVICES,
     allowedServices: userServices(req.user),
+    disabledFeatures: [...await disabledFeatures()],
     company: await companyBranding(req.user.companyId),
     properties: await accessibleProperties(req.user),
   });
