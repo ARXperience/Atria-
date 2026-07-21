@@ -147,7 +147,7 @@
       const panel=d.querySelector('#haPanel'), body=d.querySelector('#haBody'), coach=d.querySelector('#haCoach'), coachP=d.querySelector('#haCoachP');
       const add=(t,dir)=>{const el=document.createElement('div');el.className='ha-msg '+dir;el.textContent=t;body.appendChild(el);body.scrollTop=body.scrollHeight;};
       let chatOpened=false, coachShown=false, coachDismissed=false, currentKey=null; const fired=new Set(); let coachTimer;
-      const open=()=>{panel.hidden=false;coach.hidden=true;coachShown=false;chatOpened=true;if(!ASST_SEEDED){ASST_SEEDED=true;add(`¡Hola! 👋 Bienvenido a ${name}. ¿En qué te ayudo? Puedo contarte de habitaciones, servicios y ayudarte a reservar.`,'in');}d.querySelector('#haText').focus();};
+      const open=()=>{panel.hidden=false;coach.hidden=true;coachShown=false;chatOpened=true;if(!ASST_SEEDED){ASST_SEEDED=true;add(`¡Hola! 👋 Bienvenido a ${name}. Puedo *reservar* por ti, *agendar servicios* (transporte, spa, late check-out, una cena o un evento), pedir *room service* y resolver tus dudas — todo por aquí. ¿En qué te ayudo? 😊`,'in');}d.querySelector('#haText').focus();};
       const close=()=>{panel.hidden=true;};
       d.querySelector('#haFab').onclick=()=>panel.hidden?open():close();
       d.querySelector('#haClose').onclick=close;

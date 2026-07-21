@@ -1209,6 +1209,21 @@ async function main() {
       assert.match(data.replies.join(' '), /parqueadero|cubierto|gratis/i, 'debe responder con el ítem de conocimiento "Parqueadero"');
     });
 
+    await test('el agente anuncia sus capacidades (reservar y agendar) al cliente', async () => {
+      const sid = 'caps-test';
+      const { data } = await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: '¿Qué puedes hacer?' } });
+      const reply = data.replies.join(' ');
+      assert.match(reply, /reservar/i, 'debe mencionar que puede reservar');
+      assert.match(reply, /agendar|coordinar/i, 'debe mencionar que puede agendar servicios');
+    });
+
+    await test('el agente agenda una solicitud de servicio del cliente', async () => {
+      const sid = 'sched-test';
+      const { data } = await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: 'Quiero agendar transporte al aeropuerto para mi salida' } });
+      const reply = data.replies.join(' ');
+      assert.match(reply, /coordinad|solicitud|equipo/i, 'debe confirmar que dejó la solicitud coordinada');
+    });
+
     await test('el agente responde datos de una habitación desde el contenido', async () => {
       const sid = 'room-test';
       const { data } = await api(`/api/public/webchat/${propertyId}/messages`, { method: 'POST', body: { sessionId: sid, text: '¿Qué incluye la habitación Estándar?' } });

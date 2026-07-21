@@ -18,10 +18,26 @@ import { buildTools, toolDefsForLLM } from './tools.js';
 import { guestRecall, summarizeConversation, saveConversationSummary, updateGuestMemory } from './memory.js';
 import { fmtCOP, dayStr, parseDay, nightsBetween } from '../../lib/util.js';
 import { audit } from '../../lib/audit.js';
+import { notify } from '../notifications.js';
 import { logger } from '../../lib/logger.js';
 
 const ESCALATION = /\b(queja|reclamo|reembolso|devoluci[oó]n|demanda|abogado|p[eé]simo|horrible|indignad|estafa|hablar con (un |una )?(humano|persona|asesor|agente|recepci[oó]n)|asesor humano)\b/i;
 const GREETING = /^(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|hey|hi|hello|saludos)[\s!.,]*$/i;
+// El cliente pregunta qué puede hacer el asistente → se listan las capacidades.
+const CAPABILITIES = /\b(qu[eé] (puedes|sabes|pod[eé]s) hacer|en qu[eé] (me )?(puedes |pod[eé]s )?ayud|ayuda(rme)?|opciones|men[uú]|para qu[eé] sirves|qu[eé] mas puedes|qu[eé] más puedes)\b/i;
+// Solicitudes de servicio/agenda (no-alojamiento): requieren un verbo de acción
+// junto a un servicio, para no confundir preguntas informativas ("¿tienen spa?").
+const SERVICE_REQUEST = /\b(agenda|agendar|ag[eé]ndame|coordina|coordinar|solic|pedir|reserv|quiero|quisiera|necesito|me gustar[ií]a|podr[ií]an?)\b[\s\S]{0,40}\b(transporte|traslado|taxi|recogida|aeropuerto|late ?check|check.?out tarde|early ?check|spa|masaje|tour|paseo|excursi[oó]n|decoraci[oó]n|celebraci[oó]n|cumplea[nñ]os|anivers|cuna|toallas?|almohadas?|amenit|room ?service|servicio a la habitaci[oó]n|una mesa|cena rom[aá]ntica|evento|sal[oó]n de eventos|reuni[oó]n)\b/i;
+
+function capabilitiesMessage(propertyName) {
+  return `Puedo ayudarte con todo esto aquí mismo por el chat 💬:\n`
+    + `🛏️ *Reservar* — busco disponibilidad, te cotizo con impuestos incluidos y creo tu reserva con link de pago.\n`
+    + `🧳 *Agendar y coordinar* — late check-out, transporte al aeropuerto, spa, tour, una cena o un evento: lo dejo listo con el equipo.\n`
+    + `🍽️ *Room service* — si ya estás con nosotros, tomo tu pedido y lo cargo a tu habitación.\n`
+    + `📍 *Información* — habitaciones, servicios, ubicación y políticas de *${propertyName}*.\n`
+    + `🙋 *Hablar con una persona* cuando lo prefieras.\n\n`
+    + `¿Con qué empezamos? 😊`;
+}
 const CONFIRM = /\b(s[ií]|confirmo|confirmar|dale|listo|ok|okay|de acuerdo|acepto|reservar|res[eé]rvala|hazla|perfecto|claro)\b/i;
 const CANCEL_FLOW = /\b(cancelar|ya no|olv[ií]dalo|no gracias|d[eé]jalo as[ií])\b/i;
 const ASK_LOCATION = /\b(ubicaci[oó]n|direcci[oó]n|d[oó]nde (est[aá]n?|queda)|como llegar|cómo llegar)\b/i;
@@ -204,6 +220,20 @@ export async function assistantReply({ propertyId, conversation, text }) {
       }
     }
 
+    // 8b) El cliente pregunta qué puede hacer → listamos capacidades (incluye agendar).
+    if (CAPABILITIES.test(text)) {
+      say(capabilitiesMessage(property.name));
+      return finish(replies, conversation, text, 'capabilities');
+    }
+
+    // 8c) Solicitud de servicio/agenda (no-alojamiento) → se coordina con el equipo.
+    if (SERVICE_REQUEST.test(text)) {
+      await notify({ propertyId, audienceRole: 'FRONTDESK', severity: 'info', title: 'Solicitud vía asistente IA', body: text.slice(0, 400) });
+      await audit({ propertyId, actor: 'ai', action: 'ai.request_scheduled', entity: 'Conversation', entityId: conversation.id, after: { text: text.slice(0, 200) } });
+      say('¡Listo! 📝 Tomé tu solicitud y la dejé coordinada con nuestro equipo; te contactarán para confirmar los detalles. ¿Te ayudo con algo más — una reserva, precios o información del hotel?');
+      return finish(replies, conversation, text, 'service_request');
+    }
+
     // 9) Intención de reserva sin fechas → pedirlas
     if (BOOKING_HINT.test(text)) {
       ctx.state = 'need_dates';
@@ -222,7 +252,7 @@ export async function assistantReply({ propertyId, conversation, text }) {
       }
       const name = profile.displayName || 'Atria';
       say(profile.greeting
-        || `¡Hola! 👋 Bienvenido(a) a *${property.name}*. Soy ${name}, tu asistente virtual. Puedo ayudarte a consultar disponibilidad, cotizar y reservar. ¿Para qué fechas te gustaría hospedarte?`);
+        || `¡Hola! 👋 Bienvenido(a) a *${property.name}*. Soy ${name}, tu asistente virtual. Puedo reservar por ti, agendar servicios (transporte, spa, late check-out, eventos), pedir room service y resolver tus dudas — todo por aquí. ¿En qué te ayudo? Si buscas hospedarte, dime las fechas. 😊`);
       return finish(replies, conversation, text, 'greeting');
     }
 
@@ -236,8 +266,8 @@ export async function assistantReply({ propertyId, conversation, text }) {
       }
     }
 
-    // Fallback: menú guiado con la identidad del hotel
-    say(`Puedo ayudarte con:\n1️⃣ Consultar disponibilidad y reservar\n2️⃣ Información de *${property.name}* (habitaciones, servicios, ubicación)\n3️⃣ Hablar con una persona\n\nCuéntame, ¿qué necesitas? Si es una reserva, dime las fechas y número de personas. 😊`);
+    // Fallback: menú guiado con la identidad del hotel (incluye agendar servicios)
+    say(`Puedo ayudarte con:\n1️⃣ Consultar disponibilidad y *reservar*\n2️⃣ *Agendar servicios*: transporte, spa, late check-out, una cena o un evento\n3️⃣ *Room service* si ya estás con nosotros\n4️⃣ Información de *${property.name}* (habitaciones, servicios, ubicación)\n5️⃣ Hablar con una persona\n\nCuéntame, ¿qué necesitas? Si es una reserva, dime las fechas y número de personas. 😊`);
     return finish(replies, conversation, text, 'fallback');
   } catch (err) {
     logger.error({ err }, 'assistant error');

@@ -6,8 +6,8 @@ export const AGENT_SCOPES = ['guest', 'reception', 'housekeeping', 'maintenance'
 
 // Configuración proactiva por defecto del asistente de huéspedes en el sitio (§14).
 export const GUEST_PROACTIVE_DEFAULT = {
-  welcomeMessage: '¿Necesitas ayuda? Pregúntame por habitaciones, precios, servicios o cómo reservar. 😊',
-  suggestions: ['Ver disponibilidad', 'Servicios del hotel', '¿Dónde están ubicados?', 'Hablar con una persona'],
+  welcomeMessage: 'Puedo reservar por ti, agendar servicios (transporte, spa, late check-out…) y resolver tus dudas, todo por aquí. ¿Te ayudo? 😊',
+  suggestions: ['Reservar ahora', 'Agendar un servicio', 'Servicios del hotel', 'Hablar con una persona'],
 };
 
 // Normaliza las sugerencias almacenadas (JSON array o CSV) a un array de textos.
